@@ -24,6 +24,10 @@ const EXPENSE_CATS = [
   { id: 'abonnements', name: 'Abonnements', emoji: '📺' },
   { id: 'shopping', name: 'Shopping', emoji: '🛍️' },
   { id: 'credits', name: 'Crédits', emoji: '🏦' },
+  { id: 'jeux', name: 'Jeux & paris', emoji: '🎰' },
+  { id: 'epargne', name: 'Épargne', emoji: '🐖' },
+  { id: 'voyage', name: 'Voyage', emoji: '✈️' },
+  { id: 'tabac', name: 'Tabac', emoji: '🚬' },
   { id: 'autres', name: 'Autres', emoji: '💸' },
 ];
 const INCOME_CATS = [
@@ -43,10 +47,15 @@ const KEYWORDS = {
   logement: ['loyer', 'charges copro', 'syndic', 'foncia', 'nexity', 'citya', 'immobilier', 'agence immo'],
   transport: ['essence', 'carburant', 'gasoil', 'gazole', 'diesel', 'sp95', 'sp98', 'station', 'totalenergies', 'total energies', 'total acces', 'esso', 'shell', 'bp ', 'avia', 'sncf', 'ter ', 'tgv', 'train', 'ratp', 'navigo', 'bus', 'metro', 'tram', 'peage', 'autoroute', 'vinci', 'aprr', 'sanef', 'parking', 'uber', 'blablacar', 'flixbus', 'trottinette', 'velib', 'garage', 'norauto', 'feu vert', 'controle technique'],
   factures: ['edf', 'gdf', 'engie', 'total energies', 'eau', 'veolia', 'saur', 'suez', 'electricite', 'gaz', 'facture', 'impot', 'dgfip', 'tresor public', 'taxe', 'assurance', 'maif', 'macif', 'maaf', 'matmut', 'gmf', 'axa', 'allianz', 'groupama'],
-  sante: ['pharmacie', 'medecin', 'docteur', 'dr ', 'dentiste', 'kine', 'osteo', 'labo', 'laboratoire', 'hopital', 'clinique', 'opticien', 'optic', 'ophtalmo', 'infirmier'],
+  sante: ['pharmacie', 'medecin', 'docteur', 'dr ', 'dentiste', 'kine', 'osteo', 'labo', 'laboratoire', 'hopital', 'clinique', 'opticien', 'optic', 'ophtalmo', 'infirmier', 'qare', 'doctolib', 'maiia'],
   abonnements: ['internet', 'free ', 'free mobile', 'freebox', 'orange', 'sosh', 'sfr', 'red by sfr', 'bouygues', 'bbox', 'netflix', 'spotify', 'deezer', 'disney', 'canal', 'prime video', 'amazon prime', 'apple.com', 'icloud', 'google ', 'youtube', 'microsoft', 'office 365', 'adobe', 'ovh', 'abonnement', 'forfait', 'salle de sport', 'basic fit', 'fitness'],
   credits: ['credit', 'pret', 'mensualite', 'echeance pret', 'cofidis', 'cetelem', 'sofinco', 'younited', 'franfinance', 'cofinoga', 'banque casino', 'floa'],
-  shopping: ['amazon', 'cdiscount', 'vetement', 'zara', 'h&m', 'kiabi', 'zalando', 'vinted', 'fnac', 'darty', 'boulanger', 'leroy merlin', 'castorama', 'brico', 'ikea', 'conforama', 'but ', 'decathlon', 'action', 'gifi', 'shein', 'aliexpress'],
+  shopping: ['amazon', 'cdiscount', 'vetement', 'zara', 'h&m', 'kiabi', 'zalando', 'vinted', 'fnac', 'darty', 'boulanger', 'leroy merlin', 'castorama', 'brico', 'ikea', 'conforama', 'but ', 'decathlon', 'action', 'gifi', 'shein', 'aliexpress', 'grow quality'],
+  jeux: ['fdj', 'francaise des jeux', 'winamax', 'betclic', 'unibet', 'pmu', 'parions', 'parionssport', 'poker', 'pokerstars', 'betting', 'zebet', 'netbet'],
+  epargne: ['bitstack', 'crypto', 'coinbase', 'binance', 'kraken', 'trade republic', 'traderepublic', 'livret', 'epargne', 'ldds', 'pea', 'assurance vie'],
+  voyage: ['airbnb', 'booking', 'booking.com', 'hotel', 'ryanair', 'easyjet', 'air france', 'transavia', 'expedia', 'abritel', 'gite', 'camping'],
+  tabac: ['tabac', 'civette', 'buraliste', 'cigarette', 'presse', 'la civette'],
+  loisirs: ['steam', 'instant gaming', 'instant-gaming', 'instant-gamin', 'playstation', 'xbox', 'nintendo', 'cinema', 'ugc', 'pathe', 'gaumont', 'concert', 'fitness', 'piscine', 'twitch', 'jeux video'],
   salaire: ['salaire', 'paie', 'paye', 'remuneration', 'virement salaire', 'vir salaire', 'sal '],
   aide: ['caf', 'aide', 'apl', 'rsa', 'pole emploi', 'france travail', 'msa', 'allocation', 'prime activite'],
   remboursement: ['remboursement', 'rembours', 'mutuelle', 'cpam', 'ameli', 'secu', 'harmonie mut', 'assurance maladie'],
@@ -144,6 +153,7 @@ function defaultState() {
     version: 1,
     transactions: [],
     budgets: {},
+    rules: {},   // marchands appris : { motclé: catégorie }
     settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0 },
   };
 }
@@ -277,15 +287,40 @@ function daysLeftInMonth() {
 function totalBudget() {
   return round2(Object.values(state.budgets).reduce((s, v) => s + (v || 0), 0));
 }
+// Correspondance par mot entier (évite que "eau" matche dans "chateau").
+function kwMatch(n, w) {
+  w = normTxt(w);
+  if (!w) return false;
+  const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('(^|[^a-z0-9])' + esc + '([^a-z0-9]|$)').test(n);
+}
 function guessCategory(note, type) {
-  const n = (note || '').toLowerCase();
+  const n = normTxt(note);
   if (!n) return null;
   const pool = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
+  // 1) règles apprises des corrections manuelles (prioritaires)
+  const rules = (state && state.rules) || {};
+  for (const kw in rules) {
+    const cat = rules[kw];
+    if (kw && kwMatch(n, kw) && pool.some((c) => c.id === cat)) return cat;
+  }
+  // 2) dictionnaire intégré
   for (const [cat, words] of Object.entries(KEYWORDS)) {
     if (!pool.some((c) => c.id === cat)) continue;
-    if (words.some((w) => n.includes(w))) return cat;
+    if (words.some((w) => kwMatch(n, w))) return cat;
   }
   return null;
+}
+// Retient le marchand quand tu corriges une catégorie à la main.
+const RULE_STOPWORDS = new Set(['paiement', 'carte', 'cb', 'prlv', 'sepa', 'vir', 'virement', 'achat',
+  'retrait', 'france', 'avec', 'pour', 'date', 'ref', 'sarl', 'sas', 'eurl', 'facture', 'mensuel',
+  'client', 'clients', 'particuliers', 'recu', 'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par']);
+function learnRule(note, cat) {
+  const tokens = normTxt(note).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !RULE_STOPWORDS.has(w));
+  if (!tokens.length) return;
+  tokens.sort((a, b) => b.length - a.length);
+  state.rules = state.rules || {};
+  state.rules[tokens[0]] = cat;
 }
 function buildInsights() {
   const out = [];
@@ -710,7 +745,13 @@ function renderSheet() {
   el('seg-exp').addEventListener('click', () => { draft.type = 'expense'; syncDraftFromInputs(); renderSheet(); });
   el('seg-inc').addEventListener('click', () => { draft.type = 'income'; syncDraftFromInputs(); renderSheet(); });
   sheet.querySelectorAll('[data-cat]').forEach((n) =>
-    n.addEventListener('click', () => { draft.category = n.getAttribute('data-cat'); draft._catManual = true; renderSheet(); }));
+    n.addEventListener('click', () => {
+      // Pas de re-rendu complet (sinon on perd le montant/la date déjà saisis) :
+      // on met juste à jour la sélection visuelle.
+      draft.category = n.getAttribute('data-cat');
+      draft._catManual = true;
+      highlightCat(draft.category);
+    }));
   el('f-note').addEventListener('input', (e) => {
     draft.note = e.target.value;
     if (!draft._catManual) {
@@ -747,6 +788,11 @@ async function saveTx() {
     state.transactions[i] = tx;
   } else {
     state.transactions.push(tx);
+  }
+  // Apprentissage : si tu as choisi la catégorie toi-même sur une opération qui a un libellé,
+  // l'appli retient le marchand pour la prochaine fois.
+  if (tx.note && draft && draft._catManual && tx.category !== 'autres' && tx.category !== 'autres_in') {
+    learnRule(tx.note, tx.category);
   }
   await save();
   closeSheet();
