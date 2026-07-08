@@ -1,10 +1,11 @@
 /* Coffre — service worker : met l'app en cache pour un fonctionnement hors-ligne. */
-const CACHE = 'coffre-v1';
+const CACHE = 'coffre-v2';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './vendor/xlsx.full.min.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

@@ -13,8 +13,20 @@ téléphone**. Aucune donnée n'est envoyée sur internet, aucun compte, aucun a
 - **Budgets par catégorie** avec jauges et **alertes** avant de déraper.
 - **Analyse** : répartition en camembert + dépenses des 6 derniers mois.
 - **Conseils intelligents** locaux (plus gros poste, comparaison au mois dernier, dépassements).
+- **Import de relevé bancaire** (Excel .xlsx ou CSV) : détection automatique des colonnes
+  (date, libellé, débit/crédit ou montant signé), aperçu avant validation, catégorisation
+  automatique, anti-doublon. Le fichier est lu sur l'appareil, jamais envoyé ailleurs.
 - **Sauvegarde / restauration** de tes données (fichier JSON).
 - **Hors-ligne** total, **thème clair/sombre**.
+
+## Importer ton relevé (Excel recommandé)
+
+1. Depuis ton espace bancaire, exporte tes opérations en **Excel (.xlsx)** ou **CSV**.
+2. Dans Coffre : **Réglages > Importer un relevé bancaire**, choisis le fichier.
+3. Vérifie que les colonnes sont bien reconnues (tu peux les corriger), regarde l'aperçu,
+   puis valide. Les opérations déjà présentes sont ignorées automatiquement.
+
+> Évite le PDF : la mise en page casse l'extraction. L'export Excel donne un import fiable.
 
 ## Sécurité (le point important)
 

@@ -47,8 +47,9 @@ const KEYWORDS = {
   abonnements: ['internet', 'free', 'orange', 'sfr', 'bouygues', 'netflix', 'spotify', 'disney', 'abo', 'forfait'],
   credits: ['credit', 'pret', 'mensualite', 'banque', 'remboursement pret'],
   shopping: ['amazon', 'vetement', 'zara', 'fnac', 'darty'],
-  salaire: ['salaire', 'paie', 'paye'],
+  salaire: ['salaire', 'paie', 'paye', 'virement salaire'],
   aide: ['caf', 'aide', 'apl', 'rsa', 'pole emploi', 'allocation'],
+  remboursement: ['remboursement', 'rembours', 'mutuelle', 'cpam', 'secu'],
 };
 
 // ---------------- État en mémoire ----------------
@@ -585,6 +586,13 @@ function viewSettings() {
       </div>
     </div>
 
+    <div class="section-title">Importer un relevé</div>
+    <div class="card">
+      <div class="set-desc" style="margin-bottom:12px">Importe le fichier <b>Excel (.xlsx) ou CSV</b> exporté depuis ta banque. Il est lu <b>sur ton téléphone</b>, jamais envoyé ailleurs. Tu vérifies tout avant de valider, et les doublons sont ignorés.</div>
+      <button class="btn" id="import-stmt">📥 Importer un relevé bancaire</button>
+      <input type="file" id="stmt-file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+    </div>
+
     <div class="section-title">Mes données</div>
     <div class="card">
       <div class="set-desc" style="margin-bottom:12px">Tes données sont chiffrées et stockées <b>uniquement sur cet appareil</b>. Fais une sauvegarde régulièrement : si tu perds le téléphone ou oublies ton code, elles sont irrécupérables.</div>
@@ -642,6 +650,8 @@ function bindSettings() {
   el('export').addEventListener('click', exportData);
   el('import').addEventListener('click', () => el('import-file').click());
   el('import-file').addEventListener('change', importData);
+  el('import-stmt').addEventListener('click', () => el('stmt-file').click());
+  el('stmt-file').addEventListener('change', handleStatementFile);
   el('wipe').addEventListener('click', wipeAll);
 }
 
@@ -830,6 +840,250 @@ async function wipeAll() {
   cryptoKey = null; state = null;
   showLock('create');
   toast('Tout a été effacé');
+}
+
+// ---------------- Import de relevé bancaire ----------------
+let imp = null;      // { rows, headerIdx, headers }
+let impMap = null;   // mapping des colonnes
+
+function normTxt(s) {
+  return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+function decodeBuffer(buf) {
+  const bytes = new Uint8Array(buf);
+  let text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  if (text.includes('�')) {
+    try { text = new TextDecoder('windows-1252').decode(bytes); } catch (e) { /* garde utf-8 */ }
+  }
+  return text;
+}
+function detectSep(line) {
+  const counts = { ';': 0, ',': 0, '\t': 0 };
+  for (const c of line) if (c in counts) counts[c]++;
+  let best = ';', max = -1;
+  for (const s in counts) if (counts[s] > max) { max = counts[s]; best = s; }
+  return best;
+}
+function parseCSV(text) {
+  const nl = text.indexOf('\n');
+  const sep = detectSep(nl >= 0 ? text.slice(0, nl) : text);
+  const rows = []; let row = []; let cur = ''; let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === sep) { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (c !== '\r') cur += c;
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((c) => String(c).trim() !== ''));
+}
+function excelSerialToDate(n) {
+  if (n < 20000 || n > 80000) return null;
+  const d = new Date(Math.round((n - 25569) * 86400000));
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function parseDateFlexible(v) {
+  if (v instanceof Date && !isNaN(v)) return ymd(v);
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return null;
+  let m;
+  if ((m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/))) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  if ((m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/))) {
+    let y = m[3]; if (y.length === 2) y = '20' + y;
+    return `${y}-${pad2(m[2])}-${pad2(m[1])}`;
+  }
+  if (/^\d{4,6}(\.\d+)?$/.test(s)) { const d = excelSerialToDate(parseFloat(s)); if (d) return ymd(d); }
+  return null;
+}
+function parseAmountFlexible(v) {
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  let s = String(v == null ? '' : v).replace(/[\s €$]/g, '').trim();
+  if (!s || s === '-') return null;
+  const hasC = s.includes(','), hasD = s.includes('.');
+  if (hasC && hasD) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasC) s = s.replace(',', '.');
+  const val = parseFloat(s);
+  return isNaN(val) ? null : val;
+}
+function readWorkbook(file) {
+  return new Promise((resolve, reject) => {
+    const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('lecture impossible'));
+    reader.onload = () => {
+      try {
+        if (isCsv) { resolve(parseCSV(decodeBuffer(reader.result))); return; }
+        const wb = XLSX.read(new Uint8Array(reader.result), { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false, defval: '' }));
+      } catch (err) { reject(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+function detectHeader(rows) {
+  const reDate = /date/;
+  const reLabel = /(libell|nature|operation|detail|motif|designation|reference|desig)/;
+  const reAmt = /(montant|debit|credit|amount)/;
+  let bestIdx = 0, bestScore = -1;
+  const n = Math.min(rows.length, 20);
+  for (let i = 0; i < n; i++) {
+    let score = 0;
+    for (const cell of rows[i]) {
+      const h = normTxt(cell);
+      if (reDate.test(h)) score++;
+      if (reLabel.test(h)) score++;
+      if (reAmt.test(h)) score++;
+    }
+    if (score > bestScore) { bestScore = score; bestIdx = i; }
+  }
+  return { idx: bestScore >= 2 ? bestIdx : 0, headers: rows[bestScore >= 2 ? bestIdx : 0] || [] };
+}
+function detectMapping(headers) {
+  const H = headers.map(normTxt);
+  const find = (re) => H.findIndex((h) => re.test(h));
+  const dateCol = find(/date/);
+  const labelCol = find(/(libell|nature|operation|detail|motif|designation|reference|desig)/);
+  const debitCol = find(/(debit|retrait)/);
+  const creditCol = find(/(credit|versement|depot)/);
+  const amountCol = H.findIndex((h) => /(montant|amount)/.test(h) && !/solde/.test(h));
+  const mode = (debitCol >= 0 || creditCol >= 0) ? 'split' : 'single';
+  return { dateCol: dateCol < 0 ? 0 : dateCol, labelCol, mode, amountCol, debitCol, creditCol };
+}
+function buildParsed() {
+  const { rows, headerIdx } = imp, m = impMap;
+  const out = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const date = parseDateFlexible(r[m.dateCol]);
+    if (!date) continue;
+    const note = m.labelCol >= 0 ? String(r[m.labelCol] || '').trim().replace(/\s+/g, ' ') : '';
+    let amount = null, type = null;
+    if (m.mode === 'split') {
+      const deb = m.debitCol >= 0 ? parseAmountFlexible(r[m.debitCol]) : null;
+      const cre = m.creditCol >= 0 ? parseAmountFlexible(r[m.creditCol]) : null;
+      if (deb && Math.abs(deb) > 0) { amount = Math.abs(deb); type = 'expense'; }
+      else if (cre && Math.abs(cre) > 0) { amount = Math.abs(cre); type = 'income'; }
+      else continue;
+    } else {
+      const v = parseAmountFlexible(r[m.amountCol]);
+      if (v === null || v === 0) continue;
+      amount = Math.abs(v); type = v < 0 ? 'expense' : 'income';
+    }
+    const category = guessCategory(note, type) || (type === 'income' ? 'autres_in' : 'autres');
+    out.push({ date, note, amount: round2(amount), type, category });
+  }
+  return out;
+}
+function sigOf(t) { return `${t.date}|${t.type}|${t.amount}|${normTxt(t.note)}`; }
+
+async function handleStatementFile(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  toast('Lecture du fichier…');
+  try {
+    const rows = await readWorkbook(file);
+    if (!rows.length) { toast('Fichier vide ou illisible'); return; }
+    const h = detectHeader(rows);
+    imp = { rows, headerIdx: h.idx, headers: h.headers };
+    impMap = detectMapping(h.headers);
+    renderImportSheet();
+    el('sheet-backdrop').classList.remove('hidden');
+    el('sheet').classList.remove('hidden');
+  } catch (err) {
+    console.error(err);
+    toast('Impossible de lire ce fichier');
+  }
+}
+function colOptions(sel) {
+  return imp.headers.map((h, i) =>
+    `<option value="${i}" ${i === sel ? 'selected' : ''}>${escapeHtml(h || ('Colonne ' + (i + 1)))}</option>`).join('');
+}
+function renderImportSheet() {
+  const parsed = buildParsed();
+  const existing = new Set(state.transactions.map(sigOf));
+  const fresh = parsed.filter((p) => !existing.has(sigOf(p)));
+  const preview = parsed.slice(0, 8).map((p) => {
+    const c = catById(p.category);
+    const cls = p.type === 'expense' ? 'exp' : 'inc';
+    const sign = p.type === 'expense' ? '-' : '+';
+    const d = p.date.slice(8, 10) + '/' + p.date.slice(5, 7);
+    return `<div class="tx-item" style="margin-bottom:8px">
+      <div class="tx-ico">${c.emoji}</div>
+      <div class="tx-main"><div class="tx-cat" style="font-size:13px">${escapeHtml(p.note || c.name)}</div>
+      <div class="tx-note">${d} · ${c.name}</div></div>
+      <div class="tx-amt ${cls}">${sign}${euro(p.amount)}</div>
+    </div>`;
+  }).join('');
+
+  el('sheet').innerHTML = `
+    <div class="sheet-grip"></div>
+    <h2>Importer un relevé</h2>
+    <p class="muted" style="font-size:13px;margin:-8px 0 14px">Vérifie que les colonnes sont bien reconnues, puis valide.</p>
+
+    <div class="field">
+      <label>Colonne Date</label>
+      <select id="map-date">${colOptions(impMap.dateCol)}</select>
+    </div>
+    <div class="field">
+      <label>Colonne Libellé</label>
+      <select id="map-label">${colOptions(impMap.labelCol)}</select>
+    </div>
+    <div class="field">
+      <label>Montant</label>
+      <div class="seg" style="margin-bottom:12px">
+        <button id="mode-single" class="${impMap.mode === 'single' ? 'on-inc' : ''}">1 colonne (signé)</button>
+        <button id="mode-split" class="${impMap.mode === 'split' ? 'on-inc' : ''}">Débit / Crédit</button>
+      </div>
+      ${impMap.mode === 'single'
+        ? `<select id="map-amount">${colOptions(impMap.amountCol)}</select>`
+        : `<div style="display:flex;gap:8px">
+             <select id="map-debit" style="flex:1">${colOptions(impMap.debitCol)}</select>
+             <select id="map-credit" style="flex:1">${colOptions(impMap.creditCol)}</select>
+           </div>
+           <div class="muted" style="font-size:11px;margin-top:6px">Débit (dépenses) à gauche, Crédit (revenus) à droite.</div>`}
+    </div>
+
+    <div class="section-title" style="margin-top:8px">Aperçu (${parsed.length} ligne(s) lue(s))</div>
+    ${parsed.length ? preview : '<div class="muted" style="font-size:13px">Aucune opération détectée. Vérifie le choix des colonnes ci-dessus.</div>'}
+
+    <button class="btn" id="do-import" style="margin-top:16px" ${fresh.length ? '' : 'disabled style="opacity:.5"'}>
+      Importer ${fresh.length} nouvelle(s) opération(s)
+    </button>
+    ${parsed.length - fresh.length > 0 ? `<p class="muted" style="text-align:center;font-size:12px;margin-top:8px">${parsed.length - fresh.length} déjà présente(s), ignorée(s).</p>` : ''}
+  `;
+
+  const reMap = () => { readMappingFromDom(); renderImportSheet(); };
+  el('map-date').addEventListener('change', reMap);
+  el('map-label').addEventListener('change', reMap);
+  el('mode-single').addEventListener('click', () => { impMap.mode = 'single'; renderImportSheet(); });
+  el('mode-split').addEventListener('click', () => { impMap.mode = 'split'; renderImportSheet(); });
+  if (impMap.mode === 'single') el('map-amount').addEventListener('change', reMap);
+  else { el('map-debit').addEventListener('change', reMap); el('map-credit').addEventListener('change', reMap); }
+  el('do-import').addEventListener('click', () => doImport(fresh));
+}
+function readMappingFromDom() {
+  const g = (id) => { const n = el(id); return n ? parseInt(n.value, 10) : -1; };
+  impMap.dateCol = g('map-date');
+  impMap.labelCol = g('map-label');
+  if (impMap.mode === 'single') impMap.amountCol = g('map-amount');
+  else { impMap.debitCol = g('map-debit'); impMap.creditCol = g('map-credit'); }
+}
+async function doImport(fresh) {
+  if (!fresh.length) return;
+  for (const p of fresh) state.transactions.push({ id: crypto.randomUUID(), ...p });
+  await save();
+  imp = null; impMap = null;
+  closeSheet();
+  switchTab('tx');
+  toast(`${fresh.length} opération(s) importée(s) ✓`);
 }
 
 // ---------------- Navigation ----------------
