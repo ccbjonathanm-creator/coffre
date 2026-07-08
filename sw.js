@@ -1,5 +1,5 @@
 /* Coffre — service worker : met l'app en cache pour un fonctionnement hors-ligne. */
-const CACHE = 'coffre-v2';
+const CACHE = 'coffre-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -27,11 +27,28 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-      return res;
-    }).catch(() => caches.match('./index.html')))
-  );
+  const url = new URL(e.request.url);
+  const isCore = e.request.mode === 'navigate'
+    || (/\.(html|js|css|webmanifest)$/.test(url.pathname) && !url.pathname.includes('/vendor/'));
+
+  if (isCore) {
+    // Réseau d'abord : les mises à jour de l'appli arrivent dès qu'on est connecté,
+    // le cache sert uniquement de secours hors-ligne.
+    e.respondWith(
+      fetch(e.request).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(e.request).then((hit) => hit || caches.match('./index.html')))
+    );
+  } else {
+    // Cache d'abord pour le reste (SheetJS, icônes) : lourd et figé.
+    e.respondWith(
+      caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        return res;
+      }))
+    );
+  }
 });

@@ -38,18 +38,18 @@ const PALETTE = ['#6d7cff', '#7c3aed', '#f472b6', '#34d399', '#fbbf24',
 
 // Mots-clés -> catégorie (catégorisation automatique de la note)
 const KEYWORDS = {
-  alimentation: ['carrefour', 'leclerc', 'lidl', 'auchan', 'intermarche', 'course', 'super', 'casino', 'aldi', 'monoprix'],
-  restaurant: ['resto', 'restaurant', 'mcdo', 'burger', 'kebab', 'pizza', 'uber eats', 'deliveroo', 'bar', 'cafe'],
-  logement: ['loyer', 'charges', 'syndic'],
-  transport: ['essence', 'carburant', 'gasoil', 'diesel', 'sncf', 'train', 'bus', 'metro', 'peage', 'parking', 'uber'],
-  factures: ['edf', 'gdf', 'engie', 'eau', 'electricite', 'gaz', 'facture', 'impot'],
-  sante: ['pharmacie', 'medecin', 'docteur', 'mutuelle', 'dentiste', 'opticien'],
-  abonnements: ['internet', 'free', 'orange', 'sfr', 'bouygues', 'netflix', 'spotify', 'disney', 'abo', 'forfait'],
-  credits: ['credit', 'pret', 'mensualite', 'banque', 'remboursement pret'],
-  shopping: ['amazon', 'vetement', 'zara', 'fnac', 'darty'],
-  salaire: ['salaire', 'paie', 'paye', 'virement salaire'],
-  aide: ['caf', 'aide', 'apl', 'rsa', 'pole emploi', 'allocation'],
-  remboursement: ['remboursement', 'rembours', 'mutuelle', 'cpam', 'secu'],
+  alimentation: ['carrefour', 'leclerc', 'e.leclerc', 'lidl', 'auchan', 'intermarche', 'itm', 'course', 'supermarche', 'super u', 'hyper u', 'casino', 'aldi', 'monoprix', 'franprix', 'picard', 'grand frais', 'biocoop', 'lidl', 'netto', 'cora', 'boulangerie', 'boucherie', 'primeur', 'epicerie'],
+  restaurant: ['resto', 'restaurant', 'brasserie', 'mcdo', "mc do", 'mcdonald', 'burger', 'kebab', 'pizza', 'sushi', 'tacos', 'subway', 'kfc', 'starbucks', 'flunch', 'uber eats', 'ubereats', 'deliveroo', 'just eat', 'snack', 'cafe', 'boulangerie patiss'],
+  logement: ['loyer', 'charges copro', 'syndic', 'foncia', 'nexity', 'citya', 'immobilier', 'agence immo'],
+  transport: ['essence', 'carburant', 'gasoil', 'gazole', 'diesel', 'sp95', 'sp98', 'station', 'totalenergies', 'total energies', 'total acces', 'esso', 'shell', 'bp ', 'avia', 'sncf', 'ter ', 'tgv', 'train', 'ratp', 'navigo', 'bus', 'metro', 'tram', 'peage', 'autoroute', 'vinci', 'aprr', 'sanef', 'parking', 'uber', 'blablacar', 'flixbus', 'trottinette', 'velib', 'garage', 'norauto', 'feu vert', 'controle technique'],
+  factures: ['edf', 'gdf', 'engie', 'total energies', 'eau', 'veolia', 'saur', 'suez', 'electricite', 'gaz', 'facture', 'impot', 'dgfip', 'tresor public', 'taxe', 'assurance', 'maif', 'macif', 'maaf', 'matmut', 'gmf', 'axa', 'allianz', 'groupama'],
+  sante: ['pharmacie', 'medecin', 'docteur', 'dr ', 'dentiste', 'kine', 'osteo', 'labo', 'laboratoire', 'hopital', 'clinique', 'opticien', 'optic', 'ophtalmo', 'infirmier'],
+  abonnements: ['internet', 'free ', 'free mobile', 'freebox', 'orange', 'sosh', 'sfr', 'red by sfr', 'bouygues', 'bbox', 'netflix', 'spotify', 'deezer', 'disney', 'canal', 'prime video', 'amazon prime', 'apple.com', 'icloud', 'google ', 'youtube', 'microsoft', 'office 365', 'adobe', 'ovh', 'abonnement', 'forfait', 'salle de sport', 'basic fit', 'fitness'],
+  credits: ['credit', 'pret', 'mensualite', 'echeance pret', 'cofidis', 'cetelem', 'sofinco', 'younited', 'franfinance', 'cofinoga', 'banque casino', 'floa'],
+  shopping: ['amazon', 'cdiscount', 'vetement', 'zara', 'h&m', 'kiabi', 'zalando', 'vinted', 'fnac', 'darty', 'boulanger', 'leroy merlin', 'castorama', 'brico', 'ikea', 'conforama', 'but ', 'decathlon', 'action', 'gifi', 'shein', 'aliexpress'],
+  salaire: ['salaire', 'paie', 'paye', 'remuneration', 'virement salaire', 'vir salaire', 'sal '],
+  aide: ['caf', 'aide', 'apl', 'rsa', 'pole emploi', 'france travail', 'msa', 'allocation', 'prime activite'],
+  remboursement: ['remboursement', 'rembours', 'mutuelle', 'cpam', 'ameli', 'secu', 'harmonie mut', 'assurance maladie'],
 };
 
 // ---------------- État en mémoire ----------------
@@ -591,6 +591,7 @@ function viewSettings() {
       <div class="set-desc" style="margin-bottom:12px">Importe le fichier <b>Excel (.xlsx) ou CSV</b> exporté depuis ta banque. Il est lu <b>sur ton téléphone</b>, jamais envoyé ailleurs. Tu vérifies tout avant de valider, et les doublons sont ignorés.</div>
       <button class="btn" id="import-stmt">📥 Importer un relevé bancaire</button>
       <input type="file" id="stmt-file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+      <button class="btn btn-2" id="recat" style="margin-top:10px">🏷️ Re-catégoriser mes opérations</button>
     </div>
 
     <div class="section-title">Mes données</div>
@@ -601,7 +602,8 @@ function viewSettings() {
         <button class="btn btn-2" id="import">⬆️ Restaurer</button>
       </div>
       <input type="file" id="import-file" accept="application/json" class="hidden">
-      <button class="btn btn-danger" id="wipe" style="margin-top:12px">🗑️ Tout effacer</button>
+      <button class="btn btn-2" id="clear-tx" style="margin-top:12px">🧹 Effacer les opérations</button>
+      <button class="btn btn-danger" id="wipe" style="margin-top:10px">🗑️ Tout effacer (code compris)</button>
     </div>
 
     <p class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre • 100% hors-ligne • chiffré AES-256</p>
@@ -652,6 +654,8 @@ function bindSettings() {
   el('import-file').addEventListener('change', importData);
   el('import-stmt').addEventListener('click', () => el('stmt-file').click());
   el('stmt-file').addEventListener('change', handleStatementFile);
+  el('recat').addEventListener('click', recategorizeAll);
+  el('clear-tx').addEventListener('click', clearTransactions);
   el('wipe').addEventListener('click', wipeAll);
 }
 
@@ -833,6 +837,25 @@ function importData(e) {
   };
   reader.readAsText(file);
 }
+async function recategorizeAll() {
+  // Re-classe uniquement les opérations encore en "Autres" (ne touche pas à tes choix manuels).
+  let changed = 0;
+  for (const t of state.transactions) {
+    if (t.category !== 'autres' && t.category !== 'autres_in') continue;
+    const g = guessCategory(t.note, t.type);
+    if (g) { t.category = g; changed++; }
+  }
+  await save();
+  render();
+  toast(changed ? `${changed} opération(s) reclassée(s) ✓` : 'Rien à reclasser (libellés non reconnus)');
+}
+async function clearTransactions() {
+  if (!confirm('Effacer toutes tes opérations ? Ton code et tes budgets sont conservés.')) return;
+  state.transactions = [];
+  await save();
+  render();
+  toast('Opérations effacées');
+}
 async function wipeAll() {
   if (!confirm('Effacer TOUTES tes données et ton code ? Cette action est irréversible.')) return;
   localStorage.removeItem(LS.data);
@@ -929,8 +952,8 @@ function readWorkbook(file) {
 }
 function detectHeader(rows) {
   const reDate = /date/;
-  const reLabel = /(libell|nature|operation|detail|motif|designation|reference|desig)/;
-  const reAmt = /(montant|debit|credit|amount)/;
+  const reLabel = /(libell|nature|operation|detail|motif|designation|reference|desig|intitul|objet|communication|description|transaction|mouvement|ecriture)/;
+  const reAmt = /(montant|debit|credit|amount|somme|valeur)/;
   let bestIdx = 0, bestScore = -1;
   const n = Math.min(rows.length, 20);
   for (let i = 0; i < n; i++) {
@@ -949,12 +972,33 @@ function detectMapping(headers) {
   const H = headers.map(normTxt);
   const find = (re) => H.findIndex((h) => re.test(h));
   const dateCol = find(/date/);
-  const labelCol = find(/(libell|nature|operation|detail|motif|designation|reference|desig)/);
+  const labelCol = find(/(libell|nature|operation|detail|motif|designation|reference|desig|intitul|objet|communication|description|transaction|mouvement|ecriture)/);
   const debitCol = find(/(debit|retrait)/);
   const creditCol = find(/(credit|versement|depot)/);
   const amountCol = H.findIndex((h) => /(montant|amount)/.test(h) && !/solde/.test(h));
   const mode = (debitCol >= 0 || creditCol >= 0) ? 'split' : 'single';
   return { dateCol: dateCol < 0 ? 0 : dateCol, labelCol, mode, amountCol, debitCol, creditCol };
+}
+// Secours : quand aucune colonne "libellé" n'est reconnue par son nom, on choisit
+// la colonne qui contient le plus de texte (le libellé est la plus "bavarde").
+function pickLabelColumn(rows, headerIdx, m) {
+  const exclude = new Set([m.dateCol, m.amountCol, m.debitCol, m.creditCol].filter((i) => i >= 0));
+  let ncol = 0;
+  for (let i = headerIdx; i < Math.min(rows.length, headerIdx + 30); i++) ncol = Math.max(ncol, rows[i].length);
+  let best = -1, bestAvg = -1;
+  for (let c = 0; c < ncol; c++) {
+    if (exclude.has(c)) continue;
+    let letters = 0, n = 0;
+    for (let i = headerIdx + 1; i < Math.min(rows.length, headerIdx + 51); i++) {
+      const v = rows[i][c];
+      if (v == null || v instanceof Date || typeof v === 'number') continue;
+      letters += (String(v).match(/[A-Za-zÀ-ÿ]/g) || []).length;
+      n++;
+    }
+    const avg = n ? letters / n : 0;
+    if (avg > bestAvg) { bestAvg = avg; best = c; }
+  }
+  return bestAvg >= 2 ? best : -1;
 }
 function buildParsed() {
   const { rows, headerIdx } = imp, m = impMap;
@@ -994,6 +1038,7 @@ async function handleStatementFile(e) {
     const h = detectHeader(rows);
     imp = { rows, headerIdx: h.idx, headers: h.headers };
     impMap = detectMapping(h.headers);
+    if (impMap.labelCol < 0) impMap.labelCol = pickLabelColumn(rows, h.idx, impMap);
     renderImportSheet();
     el('sheet-backdrop').classList.remove('hidden');
     el('sheet').classList.remove('hidden');
