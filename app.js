@@ -1022,39 +1022,54 @@ async function readPdf(file) {
   return pdfLinesToRows(lines);
 }
 function pdfLinesToRows(lines) {
-  const dateRe = /(\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?)/;
-  const txns = [];
+  const dateTok = /^\d{1,2}[\/.\-]\d{2}([\/.\-]\d{2,4})?$/;   // token entier = une date
+  const anyDate = /\d{1,2}[\/.\-]\d{2}(?:[\/.\-]\d{2,4})?/;
+  const signTok = /^[+\-−]$/;
+  const hasCents = (s) => /\d[.,]\d{2}$/.test(String(s).replace(/[\s ]/g, ''));
+  const raw = [];
   for (const ln of lines) {
     const items = ln.items.slice().sort((a, b) => a.x - b.x);
-    const joined = items.map((i) => i.str).join(' ');
-    const dm = joined.match(dateRe);
-    if (!dm || joined.indexOf(dm[1]) > 12) continue; // la date doit être en tête de ligne
-    const money = items.filter((it) => isMoneyStr(it.str)).map((it) => ({ x: it.x, raw: it.str }));
-    if (!money.length) continue;
-    const firstMoneyX = Math.min(...money.map((m) => m.x));
-    let label = items.filter((it) => it.x < firstMoneyX - 1).map((i) => i.str).join(' ');
-    label = label.replace(new RegExp(dateRe.source, 'g'), ' ').replace(/\s+/g, ' ').trim();
-    txns.push({ date: dm[1], label, money });
+    const strs = items.map((i) => i.str.trim());
+    // date d'opération : premier token date, situé en début de ligne (écarte les lignes de solde)
+    const di = strs.findIndex((s) => dateTok.test(s));
+    if (di < 0 || items[di].x > 110) continue;
+    const dm = strs[di].match(anyDate);
+    if (!dm) continue;
+    // tous les montants de la ligne (chaque token à centimes, avec ses milliers et son signe)
+    const amounts = [];
+    for (let i = 0; i < strs.length; i++) {
+      if (!hasCents(strs[i])) continue;
+      let s = i;
+      while (s - 1 >= 0 && /^\d{1,3}$/.test(strs[s - 1]) && !hasCents(strs[s - 1]) && (items[s].x - items[s - 1].x) < 30) s--;
+      const num = strs.slice(s, i + 1).join('').replace(/[\s ]/g, '');
+      let sign = '';
+      if (s - 1 >= 0 && signTok.test(strs[s - 1])) sign = (strs[s - 1] === '-' || strs[s - 1] === '−') ? '-' : '+';
+      amounts.push({ x: items[i].x, value: (sign === '-' ? '-' : '') + num });
+    }
+    if (!amounts.length) continue;
+    const firstAmtX = Math.min(...amounts.map((a) => a.x));
+    // libellé : entre la date et le 1er montant, hors dates et signes
+    const label = items
+      .filter((it, idx) => idx > di && it.x < firstAmtX - 1 && !dateTok.test(strs[idx]) && !signTok.test(strs[idx]))
+      .map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim();
+    raw.push({ date: dm[0], label, amounts });
   }
-  if (!txns.length) return [];
+  if (!raw.length) return [];
   // Regrouper les positions X des montants en colonnes
   const centers = [];
-  txns.forEach((t) => t.money.forEach((m) => {
+  raw.forEach((t) => t.amounts.forEach((m) => {
     const c = centers.find((c) => Math.abs(c.mean - m.x) < 30);
     if (c) { c.sum += m.x; c.n++; c.mean = c.sum / c.n; } else centers.push({ sum: m.x, n: 1, mean: m.x });
   }));
   centers.sort((a, b) => a.mean - b.mean);
-  const names = centers.map((c, i) => {
-    if (centers.length === 1) return 'Montant';
-    if (centers.length >= 3 && i === centers.length - 1) return 'Solde';
-    return i === 0 ? 'Débit' : (i === 1 ? 'Crédit' : 'Colonne ' + (i + 1));
-  });
+  const names = centers.length === 1 ? ['Montant']
+    : centers.map((c, i) => (i === 0 ? 'Débit' : (i === 1 ? 'Crédit' : (i === centers.length - 1 ? 'Solde' : 'Colonne ' + (i + 1)))));
   const rows = [['Date', 'Libellé', ...names]];
-  for (const t of txns) {
+  for (const t of raw) {
     const row = [t.date, t.label];
     for (const c of centers) {
-      const m = t.money.find((mm) => Math.abs(mm.x - c.mean) < 30);
-      row.push(m ? m.raw : '');
+      const m = t.amounts.find((mm) => Math.abs(mm.x - c.mean) < 30);
+      row.push(m ? m.value : '');
     }
     rows.push(row);
   }
