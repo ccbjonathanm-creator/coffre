@@ -7,6 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
+const APP_VERSION = 'v10';
 const PIN_LENGTH = 4;
 const LS = { salt: 'coffre.salt', data: 'coffre.data' };
 const PBKDF2_ITERS = 150000;
@@ -655,7 +656,7 @@ function viewSettings() {
       <button class="btn btn-danger" id="wipe" style="margin-top:10px">🗑️ Tout effacer (code compris)</button>
     </div>
 
-    <p class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre • 100% hors-ligne • chiffré AES-256</p>
+    <p class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre ${APP_VERSION} • 100% hors-ligne • chiffré AES-256</p>
   `;
 }
 
@@ -1296,9 +1297,22 @@ async function doInstall() {
 
 // ---------------- Démarrage ----------------
 function init() {
-  // Service worker (hors-ligne)
+  // Service worker (hors-ligne) + mise à jour automatique.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.update();
+      // vérifie une nouvelle version quand l'appli revient au premier plan
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update();
+      });
+    }).catch(() => {});
+    // quand un nouveau service worker prend la main, on recharge une fois
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      location.reload();
+    });
   }
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
