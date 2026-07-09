@@ -73,6 +73,7 @@ const KEYWORDS = {
 let cryptoKey = null;   // clé AES (jamais persistée)
 let state = null;       // données déchiffrées
 let currentTab = 'dashboard';
+let analyticsMonth = null;   // mois affiché dans l'onglet Budgets & analyse (clé 'YYYY-MM')
 let lockTimer = null;
 let deferredInstall = null;
 
@@ -529,7 +530,7 @@ function donutSvg(byCat, totalExp) {
     </div>`;
 }
 
-function monthsBars() {
+function monthsBars(selectedKey) {
   const now = new Date();
   const cols = [];
   let max = 1;
@@ -538,22 +539,24 @@ function monthsBars() {
     const key = ym(d);
     const val = sumBy(txOfMonth(key), 'expense');
     max = Math.max(max, val);
-    cols.push({ lbl: d.toLocaleDateString('fr-FR', { month: 'short' }), val });
+    cols.push({ key, lbl: d.toLocaleDateString('fr-FR', { month: 'short' }), val });
   }
   const bars = cols.map((c) => {
     const h = Math.max(4, Math.round((c.val / max) * 100));
-    return `<div class="month-col">
-      <div class="month-bar" style="height:${h}%" title="${euro(c.val)}"></div>
+    const sel = c.key === selectedKey ? ' sel' : '';
+    return `<button class="month-col${sel}" data-month="${c.key}">
+      <div class="month-bar" style="height:${h}%"></div>
       <div class="month-lbl">${c.lbl}</div>
-    </div>`;
+    </button>`;
   }).join('');
   return `<div class="months">${bars}</div>`;
 }
 
 function viewBudgets() {
-  const mk = thisMonth();
+  const mk = analyticsMonth || thisMonth();
   const byCat = expenseByCat(txOfMonth(mk));
   const totalExp = sumBy(txOfMonth(mk), 'expense');
+  const moisLabel = new Date(mk + '-01T00:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
   // budgets définis
   const budgetRows = EXPENSE_CATS.map((c) => {
@@ -577,13 +580,16 @@ function viewBudgets() {
   return `
     <div class="page-head"><h1 class="page-title">Budgets & analyse</h1></div>
 
-    <div class="section-title">Répartition du mois</div>
+    <div class="section-title">Dépenses des 6 derniers mois</div>
+    <div class="card">
+      ${monthsBars(mk)}
+      <div class="muted" style="font-size:12px;text-align:center;margin-top:8px">Touche un mois pour voir sa répartition</div>
+    </div>
+
+    <div class="section-title" style="text-transform:capitalize">Répartition — ${moisLabel}</div>
     <div class="card">${donutSvg(byCat, totalExp)}</div>
 
-    <div class="section-title">Dépenses des 6 derniers mois</div>
-    <div class="card">${monthsBars()}</div>
-
-    <div class="section-title">Mes budgets mensuels</div>
+    <div class="section-title">Budgets de <span style="text-transform:capitalize">${moisLabel}</span></div>
     <div class="card">
       ${hasBudgets ? budgetRows : '<div class="muted" style="font-size:13px">Aucun budget défini. Fixe une limite par catégorie pour être alerté avant de déraper.</div>'}
       <button class="btn btn-2" id="edit-budgets" style="margin-top:14px">🎯 Modifier mes budgets</button>
@@ -672,6 +678,8 @@ function bindView() {
 
   if (currentTab === 'budgets') {
     el('edit-budgets')?.addEventListener('click', openBudgetSheet);
+    document.querySelectorAll('[data-month]').forEach((n) =>
+      n.addEventListener('click', () => { analyticsMonth = n.getAttribute('data-month'); render(); }));
   }
   if (currentTab === 'settings') bindSettings();
 }

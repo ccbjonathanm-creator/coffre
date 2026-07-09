@@ -179,9 +179,12 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 
 /* Mini barres mensuelles */
 .months { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding-top: 8px; }
-.month-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
-.month-bar { width: 100%; max-width: 34px; border-radius: 8px 8px 4px 4px; background: linear-gradient(180deg, var(--accent), var(--accent-2)); min-height: 4px; transition: height .5s; }
-.month-lbl { font-size: 11px; color: var(--muted); }
+.month-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; padding: 0; background: none; border: none; cursor: pointer; }
+.month-bar { width: 100%; max-width: 34px; border-radius: 8px 8px 4px 4px; background: linear-gradient(180deg, var(--accent), var(--accent-2)); min-height: 4px; opacity: .45; transition: height .5s, opacity .2s; }
+.month-col:active .month-bar { transform: scaleY(.98); }
+.month-col.sel .month-bar { opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.month-lbl { font-size: 11px; color: var(--muted); transition: color .2s; }
+.month-col.sel .month-lbl { color: var(--accent); font-weight: 700; }
 
 /* Boutons */
 .btn {
