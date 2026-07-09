@@ -623,9 +623,9 @@ function viewSettings() {
 
     <div class="section-title">Importer un relevé</div>
     <div class="card">
-      <div class="set-desc" style="margin-bottom:12px">Importe le fichier <b>Excel (.xlsx) ou CSV</b> exporté depuis ta banque. Il est lu <b>sur ton téléphone</b>, jamais envoyé ailleurs. Tu vérifies tout avant de valider, et les doublons sont ignorés.</div>
+      <div class="set-desc" style="margin-bottom:12px">Importe le fichier <b>Excel (.xlsx), CSV ou PDF</b> exporté depuis ta banque. Il est lu <b>sur ton téléphone</b>, jamais envoyé ailleurs. Tu vérifies tout avant de valider, et les doublons sont ignorés. <b>Excel reste le plus fiable</b> ; le PDF marche mais vérifie bien l'aperçu.</div>
       <button class="btn" id="import-stmt">📥 Importer un relevé bancaire</button>
-      <input type="file" id="stmt-file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+      <input type="file" id="stmt-file" accept=".csv,.xls,.xlsx,.pdf,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
       <button class="btn btn-2" id="recat" style="margin-top:10px">🏷️ Re-catégoriser mes opérations</button>
     </div>
 
@@ -996,6 +996,70 @@ function readWorkbook(file) {
     reader.readAsArrayBuffer(file);
   });
 }
+// --- Lecture d'un relevé PDF (texte, pas image) ---
+function isMoneyStr(s) {
+  return /^-?\d{1,3}(?:[ .]\d{3})*,\d{2}-?$|^-?\d+,\d{2}-?$/.test(String(s).replace(/ /g, ' ').trim());
+}
+async function readPdf(file) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const vp = page.getViewport({ scale: 1 });
+    const tc = await page.getTextContent();
+    const its = tc.items
+      .filter((i) => i.str && i.str.trim())
+      .map((i) => ({ x: i.transform[4], y: Math.round(vp.height - i.transform[5]), str: i.str.trim() }))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    let cur = null;
+    for (const it of its) {
+      if (cur && Math.abs(it.y - cur.y) <= 3) cur.items.push(it);
+      else { cur = { y: it.y, items: [it] }; lines.push(cur); }
+    }
+  }
+  return pdfLinesToRows(lines);
+}
+function pdfLinesToRows(lines) {
+  const dateRe = /(\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?)/;
+  const txns = [];
+  for (const ln of lines) {
+    const items = ln.items.slice().sort((a, b) => a.x - b.x);
+    const joined = items.map((i) => i.str).join(' ');
+    const dm = joined.match(dateRe);
+    if (!dm || joined.indexOf(dm[1]) > 12) continue; // la date doit être en tête de ligne
+    const money = items.filter((it) => isMoneyStr(it.str)).map((it) => ({ x: it.x, raw: it.str }));
+    if (!money.length) continue;
+    const firstMoneyX = Math.min(...money.map((m) => m.x));
+    let label = items.filter((it) => it.x < firstMoneyX - 1).map((i) => i.str).join(' ');
+    label = label.replace(new RegExp(dateRe.source, 'g'), ' ').replace(/\s+/g, ' ').trim();
+    txns.push({ date: dm[1], label, money });
+  }
+  if (!txns.length) return [];
+  // Regrouper les positions X des montants en colonnes
+  const centers = [];
+  txns.forEach((t) => t.money.forEach((m) => {
+    const c = centers.find((c) => Math.abs(c.mean - m.x) < 30);
+    if (c) { c.sum += m.x; c.n++; c.mean = c.sum / c.n; } else centers.push({ sum: m.x, n: 1, mean: m.x });
+  }));
+  centers.sort((a, b) => a.mean - b.mean);
+  const names = centers.map((c, i) => {
+    if (centers.length === 1) return 'Montant';
+    if (centers.length >= 3 && i === centers.length - 1) return 'Solde';
+    return i === 0 ? 'Débit' : (i === 1 ? 'Crédit' : 'Colonne ' + (i + 1));
+  });
+  const rows = [['Date', 'Libellé', ...names]];
+  for (const t of txns) {
+    const row = [t.date, t.label];
+    for (const c of centers) {
+      const m = t.money.find((mm) => Math.abs(mm.x - c.mean) < 30);
+      row.push(m ? m.raw : '');
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 function detectHeader(rows) {
   const reDate = /date/;
   const reLabel = /(libell|nature|operation|detail|motif|designation|reference|desig|intitul|objet|communication|description|transaction|mouvement|ecriture)/;
@@ -1077,12 +1141,16 @@ async function handleStatementFile(e) {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  toast('Lecture du fichier…');
+  const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+  toast(isPdf ? 'Lecture du PDF…' : 'Lecture du fichier…');
   try {
-    const rows = await readWorkbook(file);
-    if (!rows.length) { toast('Fichier vide ou illisible'); return; }
+    const rows = isPdf ? await readPdf(file) : await readWorkbook(file);
+    if (!rows.length) {
+      toast(isPdf ? 'PDF illisible (scanné ?) : essaie l\'export Excel' : 'Fichier vide ou illisible');
+      return;
+    }
     const h = detectHeader(rows);
-    imp = { rows, headerIdx: h.idx, headers: h.headers };
+    imp = { rows, headerIdx: h.idx, headers: h.headers, isPdf };
     impMap = detectMapping(h.headers);
     if (impMap.labelCol < 0) impMap.labelCol = pickLabelColumn(rows, h.idx, impMap);
     renderImportSheet();
@@ -1118,6 +1186,7 @@ function renderImportSheet() {
     <div class="sheet-grip"></div>
     <h2>Importer un relevé</h2>
     <p class="muted" style="font-size:13px;margin:-8px 0 14px">Vérifie que les colonnes sont bien reconnues, puis valide.</p>
+    ${imp.isPdf ? `<div class="install-banner" style="border-color:var(--orange);margin-bottom:14px"><span style="font-size:20px">⚠️</span><span class="txt">Lecture PDF : vérifie surtout les <b>montants</b> et le sens (dépense/revenu). Si une colonne "Solde" existe, ne la choisis pas comme montant. En cas de souci, préfère l'export Excel.</span></div>` : ''}
 
     <div class="field">
       <label>Colonne Date</label>
