@@ -2,6 +2,9 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
+  <!-- Sécurité : tout est local. connect-src 'none' interdit au navigateur d'envoyer
+       la moindre donnée sur le réseau, même en cas de code malveillant injecté. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'self' blob:; child-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#0b0f1a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -48,6 +51,27 @@
     </div>
   </section>
 
+  <!-- ÉCRAN DE DÉBLOCAGE (essai terminé) -->
+  <section id="licence-gate" class="lock hidden">
+    <div class="lock-inner">
+      <div class="lock-logo" aria-hidden="true">
+        <svg viewBox="0 0 100 100" width="64" height="64">
+          <rect x="20" y="44" width="60" height="42" rx="8" fill="none" stroke="currentColor" stroke-width="6"/>
+          <path d="M32 44 V32 a18 18 0 0 1 36 0 V44" fill="none" stroke="currentColor" stroke-width="6"/>
+          <circle cx="50" cy="63" r="6" fill="currentColor"/>
+        </svg>
+      </div>
+      <h1 class="lock-title">Essai terminé</h1>
+      <p class="lock-subtitle">Débloque la version à vie pour continuer</p>
+      <p class="lic-id">Ton identifiant d'appareil</p>
+      <p class="lic-device" id="lic-device">----</p>
+      <input id="lic-key" class="lic-input" type="text" placeholder="Colle ta clé de licence ici" autocomplete="off" />
+      <button id="lic-validate" class="btn">Débloquer</button>
+      <p id="lic-error" class="lock-error"></p>
+      <button id="lic-lock" class="btn btn-2" style="margin-top:10px">Verrouiller</button>
+    </div>
+  </section>
+
   <!-- APPLICATION -->
   <div id="app" class="app hidden">
     <main id="view" class="view"><!-- rendu par JS --></main>
@@ -63,7 +87,10 @@
         <span class="tab-add-btn">＋</span>
       </button>
       <button data-tab="budgets" class="tab">
-        <span class="tab-ico">🎯</span><span class="tab-lbl">Budgets</span>
+        <span class="tab-ico">📊</span><span class="tab-lbl">Budgets</span>
+      </button>
+      <button data-tab="abos" class="tab">
+        <span class="tab-ico">🎯</span><span class="tab-lbl">Abos</span>
       </button>
       <button data-tab="settings" class="tab">
         <span class="tab-ico">⚙️</span><span class="tab-lbl">Réglages</span>

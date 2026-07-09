@@ -7,10 +7,22 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v13';
 const PIN_LENGTH = 4;
-const LS = { salt: 'coffre.salt', data: 'coffre.data' };
-const PBKDF2_ITERS = 150000;
+const LS = {
+  salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
+  device: 'coffre.device', install: 'coffre.install', hwm: 'coffre.hwm', licence: 'coffre.licence',
+};
+// Licence : essai de 15 jours puis déblocage à vie par une clé signée liée à l'appareil.
+// L'appli ne connaît QUE la clé publique (elle vérifie). La clé privée reste dans l'outil
+// générateur privé de Jonathan (il seul peut fabriquer des clés valides).
+const TRIAL_DAYS = 15;
+const LICENCE_PUBKEY = { kty: 'EC', crv: 'P-256', x: 'K0QRUtH_hRpYgDzaPwPFCQB7RBtRazqixOSZWoY2fio', y: 'LSPalK2M97ttTsf6Yxzoifvg6eYgXZFDe3AE0IwiPPk' };
+let licensed = false;
+// Nombre d'itérations PBKDF2. Plus c'est haut, plus chaque tentative de forçage hors ligne
+// est lente. Les anciens coffres (150000) sont migrés vers KDF_ITERS au prochain déverrouillage.
+const KDF_ITERS = 600000;
+const LEGACY_ITERS = 150000;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
@@ -87,6 +99,13 @@ let pinFirst = '';
 let editingId = null;
 let draft = null;
 
+// Feuille des récurrences
+let editRecurId = null;
+let rdraft = null;
+
+// Filtres de l'onglet Opérations
+let txFilter = { q: '', month: 'all', cat: 'all', type: 'all' };
+
 // ---------------- Raccourcis DOM ----------------
 const $ = (s) => document.querySelector(s);
 const el = (s) => document.getElementById(s);
@@ -132,11 +151,19 @@ function fromB64(str) {
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return buf;
 }
-async function deriveKey(pin, salt) {
+async function deriveKey(pin, salt, iters) {
   const base = await crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERS, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt, iterations: iters || KDF_ITERS, hash: 'SHA-256' },
     base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+// Nombre d'itérations du coffre courant (anciens coffres sans meta = LEGACY_ITERS).
+function currentIters() {
+  try { return JSON.parse(localStorage.getItem(LS.meta)).iter || LEGACY_ITERS; }
+  catch (e) { return LEGACY_ITERS; }
+}
+function setMeta(iters) {
+  localStorage.setItem(LS.meta, JSON.stringify({ iter: iters, ver: 2 }));
 }
 async function encryptState() {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -163,8 +190,9 @@ function defaultState() {
     version: 1,
     transactions: [],
     budgets: {},
+    recurring: [],   // opérations récurrentes : { id, type, amount, category, note, day }
     rules: {},   // marchands appris : { motclé: catégorie }
-    settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0 },
+    settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0, budgetRollover: false },
   };
 }
 
@@ -193,6 +221,51 @@ function showLock(mode) {
   renderPinDots();
   el('lock-screen').classList.remove('hidden');
   el('app').classList.add('hidden');
+  if (mode === 'unlock' && guardRemaining() > 0) renderGuardWait();
+}
+
+// ---------------- Anti-forçage (délai croissant après codes faux) ----------------
+let guardInterval = null;
+function guardData() {
+  try { return JSON.parse(localStorage.getItem(LS.guard)) || {}; } catch (e) { return {}; }
+}
+function guardRemaining() {
+  return Math.max(0, (guardData().until || 0) - Date.now());
+}
+function guardReset() {
+  clearInterval(guardInterval); guardInterval = null;
+  localStorage.removeItem(LS.guard);
+}
+// Les 3 premières fautes sont tolérées (fautes de frappe), puis l'attente grimpe.
+function guardDelayMs(fails) {
+  if (fails <= 3) return 0;
+  const steps = { 4: 5, 5: 15, 6: 30, 7: 60, 8: 180 };
+  return (steps[fails] || 300) * 1000;
+}
+function guardFail() {
+  const fails = (guardData().fails || 0) + 1;
+  localStorage.setItem(LS.guard, JSON.stringify({ fails, until: Date.now() + guardDelayMs(fails) }));
+}
+function renderGuardWait() {
+  const keypad = el('keypad');
+  const err = el('lock-error');
+  pinBuffer = '';
+  renderPinDots();
+  clearInterval(guardInterval);
+  const tick = () => {
+    const ms = guardRemaining();
+    if (ms <= 0) {
+      clearInterval(guardInterval); guardInterval = null;
+      keypad.classList.remove('disabled');
+      err.textContent = '';
+      setLockSubtitle();
+      return;
+    }
+    keypad.classList.add('disabled');
+    err.textContent = `Trop d'essais. Réessaie dans ${Math.ceil(ms / 1000)}s.`;
+  };
+  tick();
+  guardInterval = setInterval(tick, 250);
 }
 function lockError(msg) {
   el('lock-error').textContent = msg;
@@ -219,23 +292,40 @@ async function pinComplete() {
     // Création réelle du coffre
     const salt = crypto.getRandomValues(new Uint8Array(16));
     localStorage.setItem(LS.salt, b64(salt));
-    cryptoKey = await deriveKey(pinFirst, salt);
+    setMeta(KDF_ITERS);
+    cryptoKey = await deriveKey(pinFirst, salt, KDF_ITERS);
     state = defaultState();
     await save();
     enterApp();
     return;
   }
-  // unlock
+  // unlock : bloqué si un délai anti-forçage est en cours
+  if (guardRemaining() > 0) { renderGuardWait(); return; }
   try {
     const salt = fromB64(localStorage.getItem(LS.salt));
-    const key = await deriveKey(pinBuffer, salt);
+    const iters = currentIters();
+    const key = await deriveKey(pinBuffer, salt, iters);
     const loaded = await decryptWith(key, localStorage.getItem(LS.data));
     cryptoKey = key;
     state = Object.assign(defaultState(), loaded);
+    guardReset();
+    // Migration transparente : ré-encrypte avec le renforcement actuel si l'ancien coffre est plus faible.
+    if (iters < KDF_ITERS) { await rekeyVault(pinBuffer); }
     enterApp();
   } catch (e) {
-    lockError('Code incorrect.');
+    guardFail();
+    const wait = guardRemaining();
+    if (wait > 0) renderGuardWait();
+    else lockError('Code incorrect.');
   }
+}
+// Ré-encrypte tout le coffre avec un nouveau sel et KDF_ITERS (migration ou changement de code).
+async function rekeyVault(pin) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  localStorage.setItem(LS.salt, b64(salt));
+  setMeta(KDF_ITERS);
+  cryptoKey = await deriveKey(pin, salt, KDF_ITERS);
+  await save();
 }
 function onKey(k) {
   if (k === 'del') { pinBuffer = pinBuffer.slice(0, -1); renderPinDots(); return; }
@@ -245,9 +335,13 @@ function onKey(k) {
   renderPinDots();
   if (pinBuffer.length === PIN_LENGTH) setTimeout(pinComplete, 120);
 }
-function enterApp() {
+async function enterApp() {
   applyTheme();
   el('lock-screen').classList.add('hidden');
+  el('licence-gate').classList.add('hidden');
+  await refreshLicence();
+  // Essai expiré et pas de licence valide : blocage total (écran de déblocage).
+  if (!licensed && trialInfo().expired) { showLicenceGate(); return; }
   el('app').classList.remove('hidden');
   resetAutoLock();
   switchTab('dashboard');
@@ -257,6 +351,7 @@ function lockApp() {
   state = null;
   clearTimeout(lockTimer);
   closeSheet();
+  el('licence-gate').classList.add('hidden');
   showLock('unlock');
 }
 function resetAutoLock() {
@@ -265,6 +360,98 @@ function resetAutoLock() {
   const min = state.settings.autoLockMin || 3;
   if (min <= 0) return;
   lockTimer = setTimeout(() => { lockApp(); }, min * 60000);
+}
+
+// ---------------- Licence (essai 15 j -> version à vie) ----------------
+// Identifiant d'appareil : aléatoire, stable, non secret. C'est lui qui est signé par la clé.
+function genDeviceId() {
+  const alpha = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // sans I, O, 0, 1, L (lisibilité)
+  const r = crypto.getRandomValues(new Uint8Array(8));
+  let s = ''; for (const b of r) s += alpha[b % alpha.length];
+  return s.slice(0, 4) + '-' + s.slice(4);
+}
+function getDeviceId() {
+  let id = localStorage.getItem(LS.device);
+  if (!id) { id = genDeviceId(); localStorage.setItem(LS.device, id); }
+  return id;
+}
+// Suivi de l'essai avec garde anti-recul d'horloge (high-water-mark du temps vu).
+function trialInfo() {
+  if (!localStorage.getItem(LS.install)) localStorage.setItem(LS.install, String(Date.now()));
+  const install = parseInt(localStorage.getItem(LS.install), 10) || Date.now();
+  const hwm = Math.max(parseInt(localStorage.getItem(LS.hwm) || '0', 10), Date.now(), install);
+  localStorage.setItem(LS.hwm, String(hwm));
+  const leftMs = TRIAL_DAYS * 86400000 - (hwm - install);
+  return { daysLeft: Math.max(0, Math.ceil(leftMs / 86400000)), expired: leftMs <= 0 };
+}
+async function verifyLicence(key, deviceId) {
+  if (!key) return false;
+  try {
+    const pub = await crypto.subtle.importKey('jwk', LICENCE_PUBKEY, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    return await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' }, pub, fromB64(key), enc.encode('coffre-licence:' + deviceId));
+  } catch (e) { return false; }
+}
+async function refreshLicence() {
+  licensed = await verifyLicence(localStorage.getItem(LS.licence), getDeviceId());
+  return licensed;
+}
+// Tente d'activer une clé saisie. Renvoie true si valide pour CET appareil.
+async function submitLicence(rawKey) {
+  const clean = (rawKey || '').trim().replace(/\s+/g, '');
+  const ok = await verifyLicence(clean, getDeviceId());
+  if (ok) { localStorage.setItem(LS.licence, clean); licensed = true; }
+  return ok;
+}
+function showLicenceGate() {
+  clearTimeout(lockTimer);
+  el('lock-screen').classList.add('hidden');
+  el('app').classList.add('hidden');
+  closeSheet();
+  el('lic-device').textContent = getDeviceId();
+  el('lic-error').textContent = '';
+  el('lic-key').value = '';
+  el('licence-gate').classList.remove('hidden');
+}
+function openLicenceSheet() {
+  const ti = trialInfo();
+  const sheet = el('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-grip"></div>
+    <h2>Débloquer la version à vie</h2>
+    <p class="muted" style="font-size:13px;margin:-8px 0 14px">${licensed
+      ? 'Ta version à vie est déjà active. Merci ! ✓'
+      : `Version d'essai : <b>${ti.daysLeft} jour(s)</b> restant(s). Pour débloquer, communique ton identifiant au vendeur puis colle la clé reçue.`}</p>
+    <div class="field">
+      <label>Ton identifiant d'appareil</label>
+      <input id="ls-device" type="text" readonly value="${getDeviceId()}" style="font-weight:700;letter-spacing:1px">
+    </div>
+    ${licensed ? '' : `
+    <div class="field">
+      <label>Clé de licence</label>
+      <input id="ls-key" type="text" placeholder="Colle la clé reçue ici">
+    </div>
+    <button class="btn" id="ls-validate">Activer</button>
+    <p id="ls-error" class="lock-error" style="text-align:center"></p>`}
+  `;
+  if (!licensed) {
+    el('ls-validate').addEventListener('click', async () => {
+      if (await submitLicence(el('ls-key').value)) { closeSheet(); render(); toast('Version à vie activée ✓ Merci !'); }
+      else el('ls-error').textContent = 'Clé invalide pour cet appareil.';
+    });
+  }
+  el('sheet-backdrop').classList.remove('hidden');
+  el('sheet').classList.remove('hidden');
+}
+function trialBanner() {
+  if (licensed) return '';
+  const ti = trialInfo();
+  const col = ti.daysLeft <= 3 ? 'var(--red)' : 'var(--orange)';
+  return `<div class="install-banner" style="border-color:${col}">
+    <span style="font-size:22px">⏳</span>
+    <span class="txt">Version d'essai : <b style="color:${col}">${ti.daysLeft} jour(s)</b> restant(s).</span>
+    <button id="unlock-lic">Débloquer</button>
+  </div>`;
 }
 
 // ---------------- Thème ----------------
@@ -297,6 +484,29 @@ function daysLeftInMonth() {
 function totalBudget() {
   return round2(Object.values(state.budgets).reduce((s, v) => s + (v || 0), 0));
 }
+function prevMonthKey(mk) {
+  const d = new Date(mk + '-01T00:00:00');
+  d.setMonth(d.getMonth() - 1);
+  return ym(d);
+}
+// Budget effectif d'une catégorie pour un mois : si le report est activé, on ajoute
+// le solde non dépensé du mois précédent (positif ou négatif), planché à 0.
+function effectiveBudget(catId, mk) {
+  const base = state.budgets[catId] || 0;
+  if (!base || !state.settings.budgetRollover) return base;
+  const prevSpent = expenseByCat(txOfMonth(prevMonthKey(mk)))[catId] || 0;
+  const leftover = round2(base - prevSpent);
+  return round2(Math.max(0, base + leftover));
+}
+// Récurrences du mois pas encore enregistrées comme opération réelle.
+// "Déjà passée" = une opération du mois a même type, même catégorie et même montant (à l'euro près).
+function pendingRecurring(mk) {
+  const list = state.recurring || [];
+  if (!list.length) return [];
+  const cur = txOfMonth(mk);
+  return list.filter((r) =>
+    !cur.some((t) => t.type === r.type && t.category === r.category && Math.abs(t.amount - r.amount) < 1));
+}
 // Correspondance par mot entier (évite que "eau" matche dans "chateau").
 function kwMatch(n, w) {
   w = normTxt(w);
@@ -327,10 +537,24 @@ const RULE_STOPWORDS = new Set(['paiement', 'carte', 'cb', 'prlv', 'sepa', 'vir'
   'client', 'clients', 'particuliers', 'recu', 'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par']);
 function learnRule(note, cat) {
   const tokens = normTxt(note).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !RULE_STOPWORDS.has(w));
-  if (!tokens.length) return;
-  tokens.sort((a, b) => b.length - a.length);
+  if (!tokens.length) return null;
+  // On retient le token le plus "marchand" : celui qui revient le plus souvent dans l'historique
+  // (une enseigne se répète d'un relevé à l'autre), à défaut le plus long.
+  const freq = (w) => state.transactions.reduce((n, t) => n + (kwMatch(normTxt(t.note), w) ? 1 : 0), 0);
+  tokens.sort((a, b) => freq(b) - freq(a) || b.length - a.length);
   state.rules = state.rules || {};
   state.rules[tokens[0]] = cat;
+  return tokens[0];   // le marchand retenu
+}
+// Corrige d'un coup toutes les opérations déjà présentes qui correspondent au même marchand.
+function applyRuleToExisting(keyword, cat, type, exceptId) {
+  if (!keyword) return 0;
+  let n = 0;
+  for (const t of state.transactions) {
+    if (t.id === exceptId || t.type !== type || t.category === cat) continue;
+    if (kwMatch(normTxt(t.note), keyword)) { t.category = cat; n++; }
+  }
+  return n;
 }
 function buildInsights() {
   const out = [];
@@ -362,16 +586,111 @@ function buildInsights() {
     out.push(['🔎', `Ton plus gros poste ce mois : <b>${c.emoji} ${c.name}</b> (${euro(top[1])}).`]);
   }
 
-  // alertes budget
-  for (const [cat, limit] of Object.entries(state.budgets)) {
-    if (!limit) continue;
+  // alertes budget (sur le budget effectif du mois : report inclus si activé)
+  for (const [cat, base] of Object.entries(state.budgets)) {
+    if (!base) continue;
+    const limit = effectiveBudget(cat, mk);
     const used = byCat[cat] || 0;
     const c = catById(cat);
+    if (limit <= 0) { out.push(['⚠️', `Budget <b>${c.name}</b> épuisé par le report du mois dernier.`]); continue; }
     if (used > limit) { out.push(['⚠️', `Budget <b>${c.name}</b> dépassé de <b>${euro(used - limit)}</b>.`]); }
     else if (used >= limit * 0.8) { out.push(['🟠', `Budget <b>${c.name}</b> presque atteint (${Math.round(used / limit * 100)}%).`]); }
   }
 
   return out.slice(0, 4);
+}
+
+// ---------------- Détecteur d'abonnements (la "Liste noire") ----------------
+// Pur calcul local sur state.transactions. Aucune connexion. Repère les débits
+// récurrents (même marchand, montant stable, cadence régulière) et les chiffre à l'année.
+
+// Catégories qui ne sont jamais des abonnements résiliables (loyer, crédit, virements internes).
+const CAT_NON_ABO = new Set(['logement', 'credits', 'banque', 'epargne']);
+// Mots parasites des libellés bancaires à jeter pour isoler le nom du marchand.
+const ABO_STOPWORDS = new Set(['paiement', 'carte', 'cb', 'prlv', 'prelevement', 'sepa', 'vir',
+  'virement', 'achat', 'retrait', 'france', 'fr', 'com', 'www', 'avec', 'pour', 'date', 'ref',
+  'sarl', 'sas', 'eurl', 'facture', 'mensuel', 'mensuelle', 'abonnement', 'client', 'recu',
+  'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par', 'sur', 'aux', 'de', 'et',
+  'ope', 'no', 'num', 'id', 'euro', 'eur']);
+
+// Signature marchand : 2 tokens les plus significatifs, triés, pour regrouper
+// "PRLV SEPA NETFLIX.COM" et "NETFLIX PAIEMENT CB" sous la même clé.
+function merchantKey(note) {
+  const tokens = normTxt(note).split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !ABO_STOPWORDS.has(w) && !/^\d+$/.test(w));
+  if (!tokens.length) return null;
+  tokens.sort((a, b) => b.length - a.length);
+  return tokens.slice(0, 2).sort().join(' ');
+}
+function daysBetween(a, b) { return Math.round((new Date(b) - new Date(a)) / 86400000); }
+function median(arr) {
+  if (!arr.length) return 0;
+  const s = arr.slice().sort((x, y) => x - y);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+// Classe une cadence médiane (jours) en fréquence nommée + nombre de prélèvements/an.
+function classifyFreq(gap) {
+  if (gap >= 6 && gap <= 9) return { freq: 'hebdomadaire', parAn: 52 };
+  if (gap >= 12 && gap <= 16) return { freq: 'bimensuel', parAn: 26 };
+  if (gap >= 25 && gap <= 35) return { freq: 'mensuel', parAn: 12 };
+  if (gap >= 58 && gap <= 70) return { freq: 'bimestriel', parAn: 6 };
+  if (gap >= 85 && gap <= 100) return { freq: 'trimestriel', parAn: 4 };
+  if (gap >= 335 && gap <= 395) return { freq: 'annuel', parAn: 1 };
+  return null; // cadence irrégulière -> pas un abonnement
+}
+// Le détecteur. Rend la liste triée du plus cher (à l'année) au moins cher.
+function detecterAbonnements(opts = {}) {
+  const minOcc = opts.minOccurrences || 3;
+  const tolMontant = opts.tolMontant != null ? opts.tolMontant : 0.15;
+  const refDate = opts.refDate ? new Date(opts.refDate) : new Date();
+
+  const depenses = (state.transactions || []).filter(
+    (t) => t.type === 'expense' && !CAT_NON_ABO.has(t.category));
+
+  const groupes = {};
+  for (const t of depenses) {
+    const k = merchantKey(t.note);
+    if (!k) continue;
+    (groupes[k] = groupes[k] || []).push(t);
+  }
+
+  const abos = [];
+  for (const [key, txs] of Object.entries(groupes)) {
+    if (txs.length < minOcc) continue;
+    txs.sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    const gaps = [];
+    for (let i = 1; i < txs.length; i++) gaps.push(daysBetween(txs[i - 1].date, txs[i].date));
+    const gapMed = median(gaps);
+    const cls = classifyFreq(gapMed);
+    if (!cls) continue;
+
+    const montants = txs.map((t) => t.amount);
+    const montMed = median(montants);
+    if (montMed <= 0) continue;
+    const ecartMax = Math.max(...montants.map((m) => Math.abs(m - montMed))) / montMed;
+    if (ecartMax > tolMontant) continue; // montant trop variable -> facture, pas abo
+
+    const dernier = txs[txs.length - 1].date;
+    const actif = daysBetween(dernier, refDate) <= gapMed * 1.8;
+
+    abos.push({
+      marchand: txs[txs.length - 1].note.trim(),
+      cle: key,
+      montant: round2(montMed),
+      frequence: cls.freq,
+      coutAnnuel: round2(montMed * cls.parAn),
+      occurrences: txs.length,
+      totalPaye: round2(montants.reduce((s, m) => s + m, 0)),
+      premier: txs[0].date,
+      dernier,
+      categorie: txs[0].category,
+      actif,
+    });
+  }
+  abos.sort((a, b) => b.coutAnnuel - a.coutAnnuel);
+  return abos;
 }
 
 // ---------------- Vues ----------------
@@ -380,6 +699,7 @@ function render() {
   if (currentTab === 'dashboard') v.innerHTML = viewDashboard();
   else if (currentTab === 'tx') v.innerHTML = viewTx();
   else if (currentTab === 'budgets') v.innerHTML = viewBudgets();
+  else if (currentTab === 'abos') v.innerHTML = viewAbos();
   else if (currentTab === 'settings') v.innerHTML = viewSettings();
   bindView();
 }
@@ -398,8 +718,11 @@ function viewDashboard() {
   const income0 = state.settings.monthlyIncome || 0;
   const useIncome = income0 > 0;
   const ref = useIncome ? income0 : totalBudget();
+  // Récurrences de dépense encore à venir ce mois : on les met de côté (provision).
+  const pend = pendingRecurring(mk);
+  const pendExp = round2(pend.filter((r) => r.type === 'expense').reduce((s, r) => s + r.amount, 0));
   if (ref > 0) {
-    const remaining = round2(ref - expense);
+    const remaining = round2(ref - expense - pendExp);
     const perDay = round2(remaining / daysLeftInMonth());
     const col = remaining < 0 ? 'var(--red)' : 'var(--green)';
     safeBlock = `
@@ -411,7 +734,7 @@ function viewDashboard() {
           </div>
         </div>
         <div class="muted" style="font-size:12px;margin-top:8px">
-          Il te reste <b style="color:${col}">${euro(remaining)}</b> sur ${useIncome ? 'tes revenus' : 'ton budget'} pour ${daysLeftInMonth()} jour(s).
+          Il te reste <b style="color:${col}">${euro(remaining)}</b> sur ${useIncome ? 'tes revenus' : 'ton budget'} pour ${daysLeftInMonth()} jour(s).${pendExp > 0 ? ` <b>${euro(pendExp)}</b> mis de côté pour tes récurrences à venir.` : ''}
         </div>
       </div>`;
   } else {
@@ -427,12 +750,30 @@ function viewDashboard() {
       ${insights.map(([e, t]) => `<div class="insight"><span class="emo">${e}</span><span class="txt">${t}</span></div>`).join('')}
     </div>` : '';
 
+  // récurrences à venir ce mois (touche pour enregistrer en une fois)
+  const pendHtml = pend.length ? `
+    <div class="section-title">À venir ce mois-ci</div>
+    <div class="card" style="padding:8px 12px">
+      ${pend.slice().sort((a, b) => a.day - b.day).map((r) => {
+        const c = catById(r.category);
+        const cls = r.type === 'expense' ? 'exp' : 'inc';
+        const sign = r.type === 'expense' ? '-' : '+';
+        return `<div class="tx-item" data-recpay="${r.id}" style="margin-bottom:6px">
+          <div class="tx-ico">${c.emoji}</div>
+          <div class="tx-main"><div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
+          <div class="tx-note">prévu le ${r.day} · touche pour enregistrer</div></div>
+          <div class="tx-amt ${cls}">${sign}${euro(r.amount)}</div>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
   // dernières opérations
   const recent = state.transactions.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 4);
   const recentHtml = recent.length ? recent.map(txRow).join('') :
     `<div class="empty"><span class="big-emo">🗒️</span>Aucune opération pour l'instant.</div>`;
 
   return `
+    ${trialBanner()}
     ${installBanner()}
     <div class="page-head">
       <div>
@@ -453,6 +794,7 @@ function viewDashboard() {
     <div style="height:14px"></div>
     ${safeBlock}
     ${insightsHtml}
+    ${pendHtml}
 
     <div class="section-title">Dernières opérations</div>
     ${recentHtml}
@@ -474,16 +816,34 @@ function txRow(t) {
     </div>`;
 }
 
-function viewTx() {
-  const list = state.transactions.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+function availableMonths() {
+  return [...new Set(state.transactions.map((t) => monthKey(t.date)))].sort().reverse();
+}
+// Applique les filtres actifs (recherche, mois, catégorie, type) et trie du plus récent.
+function filteredTx() {
+  const q = normTxt(txFilter.q);
+  return state.transactions.filter((t) => {
+    if (txFilter.type !== 'all' && t.type !== txFilter.type) return false;
+    if (txFilter.month !== 'all' && monthKey(t.date) !== txFilter.month) return false;
+    if (txFilter.cat !== 'all' && t.category !== txFilter.cat) return false;
+    if (q) {
+      const hay = normTxt((t.note || '') + ' ' + catById(t.category).name);
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+function renderTxListHtml() {
+  const list = filteredTx();
   if (!list.length) {
-    return `<div class="page-head"><h1 class="page-title">Opérations</h1></div>
-      <div class="empty"><span class="big-emo">🗒️</span>Aucune opération.<br>Appuie sur <b>+</b> pour commencer.</div>`;
+    return `<div class="empty"><span class="big-emo">🔍</span>Aucune opération ne correspond.</div>`;
   }
-  // regroupement par date
+  const anyFilter = txFilter.q || txFilter.month !== 'all' || txFilter.cat !== 'all' || txFilter.type !== 'all';
+  let solde = 0;
   let html = '';
   let lastKey = '';
   for (const t of list) {
+    solde += t.type === 'expense' ? -t.amount : t.amount;
     if (t.date !== lastKey) {
       lastKey = t.date;
       const d = new Date(t.date + 'T00:00:00');
@@ -493,7 +853,47 @@ function viewTx() {
     }
     html += txRow(t);
   }
-  return `<div class="page-head"><h1 class="page-title">Opérations</h1></div>${html}`;
+  const sum = anyFilter
+    ? `<div class="filter-sum">${list.length} opération(s) · solde ${euro(round2(solde))}</div>`
+    : '';
+  return sum + html;
+}
+function viewTx() {
+  if (!state.transactions.length) {
+    return `<div class="page-head"><h1 class="page-title">Opérations</h1></div>
+      <div class="empty"><span class="big-emo">🗒️</span>Aucune opération.<br>Appuie sur <b>+</b> pour commencer.</div>`;
+  }
+  const months = availableMonths();
+  if (txFilter.month !== 'all' && !months.includes(txFilter.month)) txFilter.month = 'all';
+  const catsPresent = [...new Set(state.transactions.map((t) => t.category))];
+  if (txFilter.cat !== 'all' && !catsPresent.includes(txFilter.cat)) txFilter.cat = 'all';
+
+  const monthOpts = ['<option value="all">Tous les mois</option>'].concat(
+    months.map((mk) => {
+      const lbl = new Date(mk + '-01T00:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      return `<option value="${mk}" ${txFilter.month === mk ? 'selected' : ''}>${lbl}</option>`;
+    })).join('');
+  const catOpts = ['<option value="all">Toutes catégories</option>'].concat(
+    catsPresent.map((id) => {
+      const c = catById(id);
+      return `<option value="${id}" ${txFilter.cat === id ? 'selected' : ''}>${c.emoji} ${c.name}</option>`;
+    })).join('');
+
+  return `
+    <div class="page-head"><h1 class="page-title">Opérations</h1></div>
+    <div class="filters">
+      <input id="flt-q" class="flt-search" type="text" inputmode="search" placeholder="🔍 Rechercher (libellé, catégorie)" value="${escapeHtml(txFilter.q)}">
+      <div class="seg flt-seg">
+        <button data-ftype="all" class="${txFilter.type === 'all' ? 'on-all' : ''}">Tout</button>
+        <button data-ftype="expense" class="${txFilter.type === 'expense' ? 'on-exp' : ''}">Dépenses</button>
+        <button data-ftype="income" class="${txFilter.type === 'income' ? 'on-inc' : ''}">Revenus</button>
+      </div>
+      <div class="flt-row">
+        <select id="flt-month">${monthOpts}</select>
+        <select id="flt-cat">${catOpts}</select>
+      </div>
+    </div>
+    <div id="tx-list">${renderTxListHtml()}</div>`;
 }
 
 function donutSvg(byCat, totalExp) {
@@ -561,11 +961,16 @@ function viewBudgets() {
 
   // budgets définis
   const budgetRows = EXPENSE_CATS.map((c) => {
-    const limit = state.budgets[c.id] || 0;
-    if (!limit) return '';
+    const base = state.budgets[c.id] || 0;
+    if (!base) return '';
+    const limit = effectiveBudget(c.id, mk);
     const used = byCat[c.id] || 0;
-    const pct = Math.min(100, Math.round((used / limit) * 100));
+    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 100;
     const cls = used > limit ? 'bar-over' : (used >= limit * 0.8 ? 'bar-warn' : 'bar-ok');
+    const diff = round2(limit - base);
+    const rollNote = (state.settings.budgetRollover && diff !== 0)
+      ? `<div class="muted" style="font-size:11px;margin-top:3px">Base ${euro(base)} · report ${diff > 0 ? '+' : ''}${euro(diff)}</div>`
+      : '';
     return `
       <div class="budget-item" data-budget="${c.id}">
         <div class="budget-top">
@@ -573,6 +978,7 @@ function viewBudgets() {
           <span class="budget-val">${euro(used)} / ${euro(limit)}</span>
         </div>
         <div class="bar ${cls}"><i style="width:${pct}%"></i></div>
+        ${rollNote}
       </div>`;
   }).join('');
 
@@ -598,10 +1004,190 @@ function viewBudgets() {
   `;
 }
 
+// ---------------- Vue : Liste noire (abonnements) ----------------
+function viewAbos() {
+  const ignore = state.aboIgnore || {};
+  const tous = detecterAbonnements();
+  const liste = tous.filter((a) => !ignore[a.cle]);
+  const ignores = tous.filter((a) => ignore[a.cle]);
+
+  if (!state.transactions.length) {
+    return `<div class="section-title">🎯 Liste noire</div>
+      <div class="card muted" style="font-size:13px">
+        Importe ou saisis tes opérations (onglet Réglages ou bouton <b>+</b>) : je repère
+        ensuite tout seul tes abonnements récurrents et je les chiffre à l'année.
+      </div>`;
+  }
+  if (!liste.length) {
+    return `<div class="section-title">🎯 Liste noire</div>
+      <div class="card" style="text-align:center;padding:24px">
+        <div style="font-size:40px">✅</div>
+        <div style="margin-top:8px"><b>Aucun abonnement récurrent détecté.</b></div>
+        <div class="muted" style="font-size:12px;margin-top:6px">
+          Il me faut au moins 3 prélèvements réguliers du même marchand, à montant stable, pour flairer un abonnement.
+        </div>
+      </div>
+      ${ignores.length ? aboIgnoresHtml(ignores) : ''}`;
+  }
+
+  const actifs = liste.filter((a) => a.actif);
+  const totalAn = round2(actifs.reduce((s, a) => s + a.coutAnnuel, 0));
+  const totalMois = round2(totalAn / 12);
+
+  const hero = `
+    <div class="card" style="text-align:center;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff">
+      <div style="font-size:12px;opacity:.9;text-transform:uppercase;letter-spacing:.5px">Tes abonnements actifs te coûtent</div>
+      <div class="big" style="color:#fff;font-size:34px;margin:4px 0">${euro(totalAn)}<span style="font-size:16px">/an</span></div>
+      <div style="font-size:13px;opacity:.95">soit ${euro(totalMois)} par mois · ${actifs.length} abonnement(s) actif(s)</div>
+    </div>`;
+
+  const cards = liste.map((a) => {
+    const c = catById(a.categorie);
+    const badge = a.actif
+      ? '<span class="abo-badge on">Actif</span>'
+      : '<span class="abo-badge off">Inactif</span>';
+    return `
+      <div class="card abo-card">
+        <div class="abo-top">
+          <div class="tx-ico">${c.emoji}</div>
+          <div style="flex:1;min-width:0">
+            <div class="abo-name">${escapeHtml(a.marchand)} ${badge}</div>
+            <div class="muted" style="font-size:12px">
+              ${euro(a.montant)} · ${a.frequence} · ${a.occurrences} prélèvements · depuis ${frDate(a.premier)}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="abo-cost">${euro(a.coutAnnuel)}</div>
+            <div class="muted" style="font-size:10px">par an</div>
+          </div>
+        </div>
+        <div class="abo-actions">
+          <button class="btn btn-danger abo-btn" data-resil="${escapeHtml(a.cle)}">✍️ Résilier</button>
+          <button class="btn btn-2 abo-btn" data-noabo="${escapeHtml(a.cle)}">Pas un abonnement</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="section-title">🎯 Liste noire</div>
+    ${hero}
+    <div class="muted" style="font-size:11px;margin:10px 2px">
+      Détection locale sur tes opérations. Un abonnement mal classé ? Touche « Pas un abonnement », il disparaît de la liste.
+    </div>
+    ${cards}
+    ${ignores.length ? aboIgnoresHtml(ignores) : ''}`;
+}
+
+function aboIgnoresHtml(ignores) {
+  return `
+    <div class="section-title" style="font-size:13px">Écartés (${ignores.length})</div>
+    <div class="card" style="padding:8px 12px">
+      ${ignores.map((a) => `
+        <div class="tx-item" style="margin-bottom:4px">
+          <div class="tx-main"><div class="tx-cat" style="font-size:13px">${escapeHtml(a.marchand)}</div></div>
+          <button class="linkbtn" data-restore="${escapeHtml(a.cle)}">Rétablir</button>
+        </div>`).join('')}
+    </div>`;
+}
+
+function bindAbos() {
+  document.querySelectorAll('[data-noabo]').forEach((n) =>
+    n.addEventListener('click', async () => {
+      state.aboIgnore = state.aboIgnore || {};
+      state.aboIgnore[n.getAttribute('data-noabo')] = true;
+      await save(); render(); toast('Écarté de la liste noire');
+    }));
+  document.querySelectorAll('[data-restore]').forEach((n) =>
+    n.addEventListener('click', async () => {
+      if (state.aboIgnore) delete state.aboIgnore[n.getAttribute('data-restore')];
+      await save(); render();
+    }));
+  document.querySelectorAll('[data-resil]').forEach((n) =>
+    n.addEventListener('click', () => openResiliationSheet(n.getAttribute('data-resil'))));
+}
+
+// Lettre de résiliation type (100% locale, générée à partir du marchand détecté).
+function openResiliationSheet(cle) {
+  const a = detecterAbonnements().find((x) => x.cle === cle);
+  if (!a) return;
+  const nom = cleanMerchant(a.marchand);
+  const lettre =
+`[Ton prénom et nom]
+[Ton adresse]
+[Code postal, ville]
+[N° de client / référence contrat]
+
+À [ville], le ${frDate(todayISO())}
+
+Objet : Résiliation de mon abonnement ${nom}
+Lettre recommandée avec accusé de réception
+
+Madame, Monsieur,
+
+Par la présente, je vous informe de ma décision de résilier mon abonnement ${nom} (d'un montant de ${euro(a.montant)}, prélevé à échéance ${a.frequence}), rattaché au compte identifié ci-dessus.
+
+Je vous demande de bien vouloir procéder à cette résiliation dans le respect du préavis contractuel, et de cesser tout prélèvement à compter de la date effective de résiliation.
+
+Je vous remercie de m'adresser une confirmation écrite de la prise en compte de cette demande, ainsi que la date exacte de fin de contrat.
+
+Dans l'attente, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+
+[Signature]`;
+
+  const sheet = el('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-grip"></div>
+    <h2>Résilier ${escapeHtml(nom)}</h2>
+    <p class="muted" style="font-size:12px;margin:-8px 0 12px">
+      Modèle prêt à envoyer. Complète les champs entre crochets, puis copie-le dans un mail ou un courrier.
+      La résiliation par lettre recommandée fait foi.
+    </p>
+    <textarea id="resil-txt" class="resil-area" rows="16">${escapeHtml(lettre)}</textarea>
+    <button class="btn" id="resil-copy" style="margin-top:12px">📋 Copier la lettre</button>
+    <button class="btn btn-2" id="resil-close" style="margin-top:10px">Fermer</button>
+  `;
+  el('resil-copy').addEventListener('click', () => {
+    const ta = el('resil-txt');
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    if (!ok && navigator.clipboard) navigator.clipboard.writeText(ta.value).catch(() => {});
+    toast('Lettre copiée ✓');
+  });
+  el('resil-close').addEventListener('click', closeSheet);
+  el('sheet-backdrop').classList.remove('hidden');
+  el('sheet').classList.remove('hidden');
+}
+
+// Nettoie un libellé bancaire pour un courrier : enlève les mots parasites (PRLV, SEPA, CB...)
+// et met en forme (Netflix, Salle Sport Basic Fit). Le libellé brut reste affiché sur la carte.
+function cleanMerchant(note) {
+  const mots = normTxt(note).split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 2 && !ABO_STOPWORDS.has(w) && !/^\d+$/.test(w));
+  if (!mots.length) return note.trim();
+  return mots.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+// Date ISO -> format FR lisible (jj/mm/aaaa), en heure locale.
+function frDate(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
 function viewSettings() {
   const s = state.settings;
   return `
     <div class="page-head"><h1 class="page-title">Réglages</h1></div>
+
+    <div class="section-title">Licence</div>
+    <div class="card">
+      <div class="set-row">
+        <div>
+          <div class="set-label">${licensed ? '✅ Version à vie' : '⏳ Version d\'essai'}</div>
+          <div class="set-desc">${licensed ? 'Débloquée, merci !' : `${trialInfo().daysLeft} jour(s) restant(s)`}</div>
+        </div>
+        <button class="btn btn-2" style="width:auto;padding:8px 14px" id="open-licence">${licensed ? 'Voir' : 'Débloquer'}</button>
+      </div>
+    </div>
 
     <div class="section-title">Sécurité</div>
     <div class="card">
@@ -631,9 +1217,20 @@ function viewSettings() {
         <input id="income" type="text" inputmode="decimal" value="${s.monthlyIncome || ''}" placeholder="0" style="width:110px;text-align:right;padding:10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
       </div>
       <div class="set-row">
+        <div><div class="set-label">🔁 Report du budget</div><div class="set-desc">Le solde non dépensé s'ajoute au mois suivant</div></div>
+        <label class="switch"><input type="checkbox" id="rollover-toggle" ${s.budgetRollover ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="set-row">
         <div><div class="set-label">🌗 Thème clair</div></div>
         <label class="switch"><input type="checkbox" id="theme-toggle" ${s.theme === 'light' ? 'checked' : ''}><span class="track"></span></label>
       </div>
+    </div>
+
+    <div class="section-title">Opérations récurrentes</div>
+    <div class="card">
+      <div class="set-desc" style="margin-bottom:12px">Loyer, abonnements, salaire… déclare ce qui revient chaque mois. Le tableau de bord <b>met de côté</b> ces montants dans ton reste à vivre tant que tu ne les as pas enregistrés.</div>
+      ${recurringListHtml()}
+      <button class="btn btn-2" id="add-recurring" style="margin-top:12px">➕ Ajouter une récurrence</button>
     </div>
 
     <div class="section-title">Importer un relevé</div>
@@ -646,7 +1243,7 @@ function viewSettings() {
 
     <div class="section-title">Mes données</div>
     <div class="card">
-      <div class="set-desc" style="margin-bottom:12px">Tes données sont chiffrées et stockées <b>uniquement sur cet appareil</b>. Fais une sauvegarde régulièrement : si tu perds le téléphone ou oublies ton code, elles sont irrécupérables.</div>
+      <div class="set-desc" style="margin-bottom:12px">Tes données sont chiffrées et stockées <b>uniquement sur cet appareil</b>. La sauvegarde est elle aussi <b>chiffrée</b> : le fichier est illisible sans ton code. Fais-en une régulièrement : si tu perds le téléphone ou oublies ton code, elles sont irrécupérables.</div>
       <div class="btn-row">
         <button class="btn btn-2" id="export">⬇️ Sauvegarder</button>
         <button class="btn btn-2" id="import">⬆️ Restaurer</button>
@@ -658,6 +1255,24 @@ function viewSettings() {
 
     <p class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre ${APP_VERSION} • 100% hors-ligne • chiffré AES-256</p>
   `;
+}
+
+function recurringListHtml() {
+  const list = state.recurring || [];
+  if (!list.length) return '<div class="muted" style="font-size:13px">Aucune récurrence définie.</div>';
+  return list.slice().sort((a, b) => a.day - b.day).map((r) => {
+    const c = catById(r.category);
+    const cls = r.type === 'expense' ? 'exp' : 'inc';
+    const sign = r.type === 'expense' ? '-' : '+';
+    return `<div class="tx-item" data-recur="${r.id}" style="margin-bottom:8px">
+      <div class="tx-ico">${c.emoji}</div>
+      <div class="tx-main">
+        <div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
+        <div class="tx-note">le ${r.day} de chaque mois · ${c.name}</div>
+      </div>
+      <div class="tx-amt ${cls}">${sign}${euro(r.amount)}</div>
+    </div>`;
+  }).join('');
 }
 
 function installBanner() {
@@ -677,12 +1292,45 @@ function bindView() {
   const install = el('do-install');
   if (install) install.addEventListener('click', doInstall);
 
+  if (currentTab === 'dashboard') {
+    el('unlock-lic')?.addEventListener('click', openLicenceSheet);
+    document.querySelectorAll('[data-recpay]').forEach((n) =>
+      n.addEventListener('click', () => recordRecurring(n.getAttribute('data-recpay'))));
+  }
+  if (currentTab === 'tx') bindTxFilters();
   if (currentTab === 'budgets') {
     el('edit-budgets')?.addEventListener('click', openBudgetSheet);
     document.querySelectorAll('[data-month]').forEach((n) =>
       n.addEventListener('click', () => { analyticsMonth = n.getAttribute('data-month'); render(); }));
   }
+  if (currentTab === 'abos') bindAbos();
   if (currentTab === 'settings') bindSettings();
+}
+
+// Filtres de l'onglet Opérations : ne re-rend QUE la liste (préserve le focus/curseur de la recherche).
+function bindEditRows(container) {
+  container.querySelectorAll('[data-edit]').forEach((n) =>
+    n.addEventListener('click', () => openSheet(n.getAttribute('data-edit'))));
+}
+function refreshTxList() {
+  const box = el('tx-list');
+  if (!box) return;
+  box.innerHTML = renderTxListHtml();
+  bindEditRows(box);
+}
+function bindTxFilters() {
+  el('flt-q')?.addEventListener('input', (e) => { txFilter.q = e.target.value; refreshTxList(); });
+  el('flt-month')?.addEventListener('change', (e) => { txFilter.month = e.target.value; refreshTxList(); });
+  el('flt-cat')?.addEventListener('change', (e) => { txFilter.cat = e.target.value; refreshTxList(); });
+  document.querySelectorAll('[data-ftype]').forEach((b) =>
+    b.addEventListener('click', () => {
+      txFilter.type = b.getAttribute('data-ftype');
+      document.querySelectorAll('[data-ftype]').forEach((x) => {
+        const tp = x.getAttribute('data-ftype');
+        x.className = txFilter.type !== tp ? '' : (tp === 'expense' ? 'on-exp' : tp === 'income' ? 'on-inc' : 'on-all');
+      });
+      refreshTxList();
+    }));
 }
 
 function bindSettings() {
@@ -694,11 +1342,19 @@ function bindSettings() {
     state.settings.theme = e.target.checked ? 'light' : 'dark';
     applyTheme(); await save();
   });
+  el('rollover-toggle').addEventListener('change', async (e) => {
+    state.settings.budgetRollover = e.target.checked;
+    await save(); toast('Enregistré');
+  });
+  el('add-recurring').addEventListener('click', () => openRecurringSheet(null));
+  document.querySelectorAll('[data-recur]').forEach((n) =>
+    n.addEventListener('click', () => openRecurringSheet(n.getAttribute('data-recur'))));
   el('income').addEventListener('change', async (e) => {
     const v = parseFloat(e.target.value.replace(',', '.'));
     state.settings.monthlyIncome = isNaN(v) ? 0 : round2(v);
     await save(); toast('Enregistré');
   });
+  el('open-licence').addEventListener('click', openLicenceSheet);
   el('lock-now').addEventListener('click', lockApp);
   el('change-pin').addEventListener('click', changePin);
   el('export').addEventListener('click', exportData);
@@ -726,6 +1382,7 @@ function closeSheet() {
   el('sheet-backdrop').classList.add('hidden');
   el('sheet').classList.add('hidden');
   editingId = null; draft = null;
+  editRecurId = null; rdraft = null;
 }
 function renderSheet() {
   const cats = draft.type === 'income' ? INCOME_CATS : EXPENSE_CATS;
@@ -807,14 +1464,17 @@ async function saveTx() {
     state.transactions.push(tx);
   }
   // Apprentissage : si tu as choisi la catégorie toi-même sur une opération qui a un libellé,
-  // l'appli retient le marchand pour la prochaine fois.
+  // l'appli retient le marchand (futurs imports) ET corrige toutes les opérations identiques déjà là.
+  let propagated = 0;
   if (tx.note && draft && draft._catManual && tx.category !== 'autres' && tx.category !== 'autres_in') {
-    learnRule(tx.note, tx.category);
+    const kw = learnRule(tx.note, tx.category);
+    propagated = applyRuleToExisting(kw, tx.category, tx.type, tx.id);
   }
   await save();
   closeSheet();
   render();
-  toast(editingId ? 'Modifié' : 'Ajouté ✓');
+  const base = editingId ? 'Modifié' : 'Ajouté ✓';
+  toast(propagated ? `${base} · ${propagated} similaire(s) corrigée(s)` : base);
 }
 async function deleteTx() {
   state.transactions = state.transactions.filter((t) => t.id !== editingId);
@@ -856,6 +1516,112 @@ function openBudgetSheet() {
   el('sheet').classList.remove('hidden');
 }
 
+// ---------------- Feuille : opérations récurrentes ----------------
+function openRecurringSheet(id) {
+  editRecurId = id || null;
+  const ex = id ? (state.recurring || []).find((r) => r.id === id) : null;
+  rdraft = ex ? Object.assign({}, ex) : { type: 'expense', amount: 0, category: 'logement', note: '', day: 1 };
+  renderRecurringSheet();
+  el('sheet-backdrop').classList.remove('hidden');
+  el('sheet').classList.remove('hidden');
+}
+function syncRDraft() {
+  const a = el('r-amount'); if (a) rdraft.amount = a.value;
+  const n = el('r-note'); if (n) rdraft.note = n.value;
+  const d = el('r-day'); if (d) rdraft.day = d.value;
+}
+function renderRecurringSheet() {
+  const cats = rdraft.type === 'income' ? INCOME_CATS : EXPENSE_CATS;
+  if (!cats.some((c) => c.id === rdraft.category)) rdraft.category = cats[0].id;
+  const sheet = el('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-grip"></div>
+    <h2>${editRecurId ? 'Modifier la récurrence' : 'Nouvelle récurrence'}</h2>
+    <div class="seg">
+      <button id="rseg-exp" class="${rdraft.type === 'expense' ? 'on-exp' : ''}">Dépense</button>
+      <button id="rseg-inc" class="${rdraft.type === 'income' ? 'on-inc' : ''}">Revenu</button>
+    </div>
+    <div class="field">
+      <input id="r-amount" class="amount-input" type="text" inputmode="decimal" placeholder="0,00" value="${rdraft.amount ? String(rdraft.amount).replace('.', ',') : ''}">
+    </div>
+    <div class="field">
+      <label>Catégorie</label>
+      <div class="cat-grid" id="rcat-grid">
+        ${cats.map((c) => `<button class="cat-chip ${c.id === rdraft.category ? 'sel' : ''}" data-rcat="${c.id}"><span class="e">${c.emoji}</span>${c.name}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
+      <label>Libellé</label>
+      <input id="r-note" type="text" placeholder="ex : Loyer, Netflix, Salaire" value="${escapeHtml(rdraft.note || '')}">
+    </div>
+    <div class="field">
+      <label>Jour du mois (1 à 28)</label>
+      <input id="r-day" type="number" inputmode="numeric" min="1" max="28" value="${rdraft.day || 1}">
+    </div>
+    <button class="btn" id="r-save">${editRecurId ? 'Enregistrer' : 'Ajouter'}</button>
+    ${editRecurId ? '<button class="btn btn-danger" id="r-delete" style="margin-top:10px">Supprimer</button>' : ''}
+  `;
+  el('rseg-exp').addEventListener('click', () => { rdraft.type = 'expense'; syncRDraft(); renderRecurringSheet(); });
+  el('rseg-inc').addEventListener('click', () => { rdraft.type = 'income'; syncRDraft(); renderRecurringSheet(); });
+  sheet.querySelectorAll('[data-rcat]').forEach((n) =>
+    n.addEventListener('click', () => {
+      rdraft.category = n.getAttribute('data-rcat');
+      document.querySelectorAll('#rcat-grid [data-rcat]').forEach((x) =>
+        x.classList.toggle('sel', x.getAttribute('data-rcat') === rdraft.category));
+    }));
+  el('r-save').addEventListener('click', saveRecurring);
+  el('r-delete')?.addEventListener('click', deleteRecurring);
+}
+async function saveRecurring() {
+  const raw = el('r-amount').value.replace(/\s/g, '').replace(',', '.');
+  const amount = round2(parseFloat(raw));
+  if (isNaN(amount) || amount <= 0) { toast('Entre un montant valide'); return; }
+  let day = parseInt(el('r-day').value, 10);
+  if (isNaN(day) || day < 1) day = 1;
+  if (day > 28) day = 28;
+  const rec = {
+    id: editRecurId || crypto.randomUUID(),
+    type: rdraft.type,
+    amount,
+    category: rdraft.category,
+    note: el('r-note').value.trim(),
+    day,
+  };
+  state.recurring = state.recurring || [];
+  if (editRecurId) {
+    const i = state.recurring.findIndex((r) => r.id === editRecurId);
+    state.recurring[i] = rec;
+  } else {
+    state.recurring.push(rec);
+  }
+  await save();
+  closeSheet();
+  render();
+  toast(editRecurId ? 'Récurrence modifiée ✓' : 'Récurrence ajoutée ✓');
+}
+async function deleteRecurring() {
+  state.recurring = (state.recurring || []).filter((r) => r.id !== editRecurId);
+  await save();
+  closeSheet();
+  render();
+  toast('Récurrence supprimée');
+}
+// Enregistre une récurrence du mois comme opération réelle (feuille pré-remplie à valider).
+function recordRecurring(id) {
+  const r = (state.recurring || []).find((x) => x.id === id);
+  if (!r) return;
+  editingId = null;
+  const d = new Date();
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const day = Math.min(r.day, lastDay);
+  let date = `${ym(d)}-${pad2(day)}`;
+  if (date > todayISO()) date = todayISO();   // pas de dépense future
+  draft = { type: r.type, amount: r.amount, category: r.category, date, note: r.note || '' };
+  renderSheet();
+  el('sheet-backdrop').classList.remove('hidden');
+  el('sheet').classList.remove('hidden');
+}
+
 // ---------------- Changement de PIN ----------------
 async function changePin() {
   const p1 = prompt('Nouveau code à 4 chiffres :');
@@ -863,40 +1629,78 @@ async function changePin() {
   if (!/^\d{4}$/.test(p1)) { toast('Le code doit faire 4 chiffres'); return; }
   const p2 = prompt('Confirme le nouveau code :');
   if (p2 !== p1) { toast('Les codes ne correspondent pas'); return; }
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  localStorage.setItem(LS.salt, b64(salt));
-  cryptoKey = await deriveKey(p1, salt);
-  await save();
+  await rekeyVault(p1);   // nouveau sel + renforcement PBKDF2 actuel
+  guardReset();
   toast('Code modifié ✓');
 }
 
 // ---------------- Sauvegarde / restauration / effacement ----------------
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+// Sauvegarde CHIFFRÉE : le fichier est illisible sans le code du coffre.
+// Il embarque son propre sel + le nombre d'itérations, donc restaurable sur un autre appareil.
+async function exportData() {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, cryptoKey, enc.encode(JSON.stringify(state)));
+  const out = new Uint8Array(iv.length + ct.byteLength);
+  out.set(iv, 0); out.set(new Uint8Array(ct), iv.length);
+  const pkg = {
+    app: 'coffre', fmt: 'enc-1',
+    kdf: 'PBKDF2-SHA256', iter: currentIters(),
+    salt: localStorage.getItem(LS.salt),
+    payload: b64(out),
+  };
+  const blob = new Blob([JSON.stringify(pkg)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `coffre-sauvegarde-${todayISO()}.json`;
+  a.download = `coffre-sauvegarde-${todayISO()}.coffre.json`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('Sauvegarde téléchargée');
+  toast('Sauvegarde chiffrée téléchargée 🔒');
+}
+async function applyRestored(obj) {
+  if (!obj || !Array.isArray(obj.transactions)) throw new Error('format');
+  state = Object.assign(defaultState(), obj);
+  applyTheme();
+  await save();
+  render();
+  toast('Données restaurées ✓');
 }
 function importData(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async () => {
-    try {
-      const data = JSON.parse(reader.result);
-      if (!Array.isArray(data.transactions)) throw new Error('format');
-      state = Object.assign(defaultState(), data);
-      applyTheme();
-      await save();
-      render();
-      toast('Données restaurées ✓');
-    } catch (err) {
-      toast('Fichier invalide');
+    let pkg;
+    try { pkg = JSON.parse(reader.result); }
+    catch (err) { toast('Fichier invalide'); return; }
+
+    // Nouvelle sauvegarde chiffrée
+    if (pkg && pkg.fmt === 'enc-1' && pkg.payload) {
+      try {
+        const buf = fromB64(pkg.payload);
+        const iv = buf.slice(0, 12), data = buf.slice(12);
+        // 1) même appareil / même code : la clé en mémoire suffit, rien à demander.
+        let obj = null;
+        try {
+          obj = JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, data)));
+        } catch (e1) {
+          // 2) autre appareil / autre code : on demande le code de CETTE sauvegarde.
+          const code = prompt('Code de la sauvegarde à restaurer :');
+          if (code === null) return;
+          const key = await deriveKey(code, fromB64(pkg.salt), pkg.iter || KDF_ITERS);
+          obj = JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data)));
+        }
+        await applyRestored(obj);
+      } catch (err) {
+        toast('Code incorrect ou sauvegarde illisible');
+      }
+      return;
     }
+
+    // Ancienne sauvegarde en clair (rétrocompatibilité)
+    try { await applyRestored(pkg); }
+    catch (err) { toast('Fichier invalide'); }
   };
   reader.readAsText(file);
 }
@@ -923,6 +1727,8 @@ async function wipeAll() {
   if (!confirm('Effacer TOUTES tes données et ton code ? Cette action est irréversible.')) return;
   localStorage.removeItem(LS.data);
   localStorage.removeItem(LS.salt);
+  localStorage.removeItem(LS.meta);
+  localStorage.removeItem(LS.guard);
   cryptoKey = null; state = null;
   showLock('create');
   toast('Tout a été effacé');
@@ -1280,6 +2086,8 @@ async function doImport(fresh) {
 
 // ---------------- Navigation ----------------
 function switchTab(tab) {
+  // Si l'essai vient d'expirer en cours de session, on bascule sur l'écran de déblocage.
+  if (!licensed && trialInfo().expired) { showLicenceGate(); return; }
   currentTab = tab;
   document.querySelectorAll('.tab[data-tab]').forEach((b) =>
     b.classList.toggle('active', b.getAttribute('data-tab') === tab));
@@ -1333,6 +2141,18 @@ function init() {
     if (tab === 'add') openSheet(null);
     else switchTab(tab);
   });
+
+  // Écran de déblocage (essai terminé)
+  el('lic-validate').addEventListener('click', async () => {
+    if (await submitLicence(el('lic-key').value)) {
+      el('licence-gate').classList.add('hidden');
+      toast('Version à vie activée ✓ Merci !');
+      enterApp();
+    } else {
+      el('lic-error').textContent = 'Clé invalide pour cet appareil.';
+    }
+  });
+  el('lic-lock').addEventListener('click', lockApp);
 
   // Fermeture de la feuille
   el('sheet-backdrop').addEventListener('click', closeSheet);

@@ -79,6 +79,17 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .keypad button:active { transform: scale(.93); background: var(--card-2); }
 .keypad .key-ghost { background: transparent; box-shadow: none; font-size: 16px; color: var(--muted); }
+.keypad.disabled { pointer-events: none; opacity: .35; filter: grayscale(1); }
+
+/* Écran de déblocage (licence) */
+.lic-id { color: var(--muted); font-size: 12px; margin: 22px 0 4px; }
+.lic-device { font-size: 26px; font-weight: 800; letter-spacing: 3px; margin: 0 0 20px; color: var(--accent); }
+.lic-input {
+  width: 100%; padding: 14px; font-size: 15px; border-radius: 12px; text-align: center;
+  background: var(--card); border: 1px solid var(--line); color: var(--text); margin-bottom: 14px;
+}
+.lic-input:focus { outline: none; border-color: var(--accent); }
+#licence-gate .btn { max-width: 340px; }
 .shake { animation: shake .4s; }
 @keyframes shake {
   0%,100%{transform:translateX(0)} 20%{transform:translateX(-9px)}
@@ -240,6 +251,20 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .tab-add:active .tab-add-btn { transform: scale(.93); }
 
+/* ---------------- Liste noire (abonnements) ---------------- */
+.abo-card { padding: 12px 14px; }
+.abo-top { display: flex; align-items: center; gap: 10px; }
+.abo-name { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.abo-cost { font-weight: 800; font-size: 16px; color: var(--red); }
+.abo-badge { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; vertical-align: middle; margin-left: 4px; }
+.abo-badge.on { background: color-mix(in srgb, var(--green) 22%, transparent); color: var(--green); }
+.abo-badge.off { background: var(--card-2); color: var(--muted); }
+.abo-actions { display: flex; gap: 8px; margin-top: 12px; }
+.abo-btn { flex: 1; padding: 10px 8px; font-size: 13px; margin: 0; }
+.linkbtn { color: var(--accent); font-size: 12px; font-weight: 600; padding: 4px 6px; }
+.resil-area { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--card-2);
+  color: var(--text); padding: 12px; font-size: 13px; line-height: 1.5; resize: vertical; font-family: inherit; }
+
 /* ---------------- Feuille modale ---------------- */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; animation: fade .2s; }
 .sheet {
@@ -279,6 +304,23 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .cat-chip .e { font-size: 22px; }
 .cat-chip.sel { border-color: var(--accent); color: var(--text); background: var(--card-2); }
+
+/* Filtres de l'onglet Opérations */
+.filters { margin-bottom: 8px; }
+.flt-search {
+  width: 100%; padding: 12px 14px; font-size: 15px; border-radius: 12px;
+  background: var(--card); border: 1px solid var(--line); color: var(--text); margin-bottom: 10px;
+}
+.flt-search:focus { outline: none; border-color: var(--accent); }
+.flt-seg { margin-bottom: 10px; }
+.seg button.on-all { background: var(--accent); color: #fff; }
+.flt-row { display: flex; gap: 8px; }
+.flt-row select {
+  flex: 1; min-width: 0; padding: 11px; font-size: 14px; border-radius: 12px;
+  background: var(--card); border: 1px solid var(--line); color: var(--text);
+}
+.flt-row select:focus { outline: none; border-color: var(--accent); }
+.filter-sum { color: var(--muted); font-size: 12px; font-weight: 600; margin: 4px 2px 10px; }
 
 /* Toast */
 .toast {
