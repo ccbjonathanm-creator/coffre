@@ -483,5 +483,6 @@ body {
     radial-gradient(70% 50% at 100% 110%, rgba(34, 211, 238, .16), transparent 55%),
     var(--bg);
 }
-.lock-logo { filter: drop-shadow(0 0 18px rgba(139, 123, 255, .6)); }
+.lock-logo { filter: drop-shadow(0 8px 22px rgba(139, 123, 255, .55)); margin-bottom: 14px; }
+.lock-app-icon { border-radius: 22px; display: block; }
 .keypad button:active { box-shadow: var(--glow); }

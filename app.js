@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
