@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v27';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -1394,6 +1394,12 @@ function viewAbos() {
     const action2 = a.manuel
       ? `<button class="btn btn-2 abo-btn" data-removeabo="${escapeHtml(a.manuelId)}">Retirer</button>`
       : `<button class="btn btn-2 abo-btn" data-noabo="${escapeHtml(a.cle)}">Pas un abonnement</button>`;
+    // Suivi dans le reste-à-vivre : seules les cadences mensuelle/hebdo entrent en récurrence.
+    const suivable = a.frequence === 'mensuel' || a.frequence === 'hebdomadaire';
+    const dejaSuivi = suivable && recurrenceExistePour(a);
+    const action3 = !suivable ? ''
+      : dejaSuivi ? '<span class="abo-badge on">✓ suivi</span>'
+      : `<button class="btn btn-2 abo-btn" data-torecur="${escapeHtml(a.uid)}">➕ Suivre</button>`;
     return `
       <div class="card abo-card">
         <div class="abo-top">
@@ -1409,6 +1415,7 @@ function viewAbos() {
         </div>
         <div class="abo-actions">
           <button class="btn btn-danger abo-btn" data-resil="${escapeHtml(a.uid)}">✍️ Résilier</button>
+          ${action3}
           ${action2}
         </div>
       </div>`;
@@ -1456,6 +1463,52 @@ function bindAbos() {
     }));
   document.querySelectorAll('[data-resil]').forEach((n) =>
     n.addEventListener('click', () => openResiliationSheet(n.getAttribute('data-resil'))));
+  document.querySelectorAll('[data-torecur]').forEach((n) =>
+    n.addEventListener('click', () => addAboToRecurring(n.getAttribute('data-torecur'))));
+}
+
+// Une récurrence correspond-elle déjà à cet abonnement ? (même sens, montant, libellé, cadence)
+function recurrenceExistePour(a) {
+  const hebdo = a.frequence === 'hebdomadaire';
+  const note = normTxt(cleanMerchant(a.marchand));
+  return (state.recurring || []).some((r) => r.type === 'expense'
+    && Math.abs(r.amount - a.montant) < 1
+    && normTxt(r.note) === note
+    && (r.freq || 'mensuel') === (hebdo ? 'hebdomadaire' : 'mensuel'));
+}
+
+// Transforme un abonnement détecté en récurrence (le fait entrer dans le reste-à-vivre).
+// Récupère le jour du mois / jour de la semaine depuis l'historique du marchand.
+async function addAboToRecurring(uid) {
+  const a = collectAbonnements().list.find((x) => x.uid === uid);
+  if (!a) return;
+  if (recurrenceExistePour(a)) { toast('Déjà dans tes récurrences'); return; }
+  const hebdo = a.frequence === 'hebdomadaire';
+  const mkey = String(a.cle || '').split('|')[0];
+  const m = merchantsFromTx().find((x) => x.cle === mkey);
+  let day = 1, weekday = 1;
+  if (m) {
+    day = m.day || 1;
+    if (Number.isInteger(m.weekday)) weekday = m.weekday;
+  } else if (a.dernier) {
+    day = parseInt(a.dernier.slice(8, 10), 10) || 1;
+    weekday = new Date(a.dernier + 'T00:00:00').getDay();
+  }
+  if (day > 28) day = 28;
+  state.recurring = state.recurring || [];
+  state.recurring.push({
+    id: crypto.randomUUID(),
+    type: 'expense',
+    amount: round2(a.montant),
+    category: a.categorie,
+    note: cleanMerchant(a.marchand),
+    freq: hebdo ? 'hebdomadaire' : 'mensuel',
+    day,
+    weekday,
+  });
+  await save();
+  render();
+  toast(hebdo ? `Suivi ajouté · tous les ${WEEKDAYS[weekday]}s` : `Suivi ajouté · le ${day} du mois`);
 }
 
 // Lettre de résiliation type (100% locale, générée à partir du marchand).
