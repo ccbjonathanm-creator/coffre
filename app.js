@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -539,11 +539,12 @@ function guessCategory(note, type) {
 // Retient le marchand quand tu corriges une catégorie à la main.
 const RULE_STOPWORDS = new Set(['paiement', 'carte', 'cb', 'prlv', 'sepa', 'vir', 'virement', 'achat',
   'retrait', 'france', 'avec', 'pour', 'date', 'ref', 'sarl', 'sas', 'eurl', 'facture', 'mensuel',
-  'client', 'clients', 'particuliers', 'recu', 'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par']);
+  'client', 'clients', 'particuliers', 'recu', 'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par',
+  'www', 'com', 'fra', 'sa', 'to', 'the', 'and']);
 // Extrait le "marchand" d'un libellé : le token le plus significatif (celui qui revient
 // le plus souvent dans l'historique, une enseigne se répète ; à défaut le plus long).
 function merchantKeyword(note) {
-  const tokens = normTxt(note).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !RULE_STOPWORDS.has(w));
+  const tokens = normTxt(note).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !RULE_STOPWORDS.has(w));
   if (!tokens.length) return null;
   const freq = (w) => state.transactions.reduce((n, t) => n + (kwMatch(normTxt(t.note), w) ? 1 : 0), 0);
   tokens.sort((a, b) => freq(b) - freq(a) || b.length - a.length);
@@ -1730,9 +1731,11 @@ async function saveTx() {
   if (tx.note && draft && draft._iconManual) {
     const kw = learnIconRule(tx.note, draft.icon);
     if (kw) {
-      delete tx.icon; // la règle marchand pilote l'affichage, pas une icône figée sur la ligne
-      iconApplied = state.transactions.reduce((n, t) =>
-        n + (t.type === 'expense' && kwMatch(normTxt(t.note), kw) ? 1 : 0), 0);
+      // La règle marchand pilote TOUT : on retire les icônes figées de toutes ses opérations
+      // (y compris celles changées à la main avant) pour qu'elles suivent la règle uniformément.
+      for (const t of state.transactions) {
+        if (t.type === 'expense' && kwMatch(normTxt(t.note), kw)) { delete t.icon; iconApplied++; }
+      }
     }
   }
   await save();
