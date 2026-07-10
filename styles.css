@@ -362,3 +362,126 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .install-banner .txt { flex: 1; font-size: 13px; }
 .install-banner button { padding: 8px 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; }
+
+/* ============================================================
+   DESIGN NÉON / VERRE DÉPOLI (v22)
+   Bloc ajouté en fin de fichier : il surcharge les règles ci-dessus.
+   Pour revenir au design classique, il suffit de supprimer ce bloc.
+   ============================================================ */
+:root {
+  --bg: #05060e;
+  --bg-soft: #0a0d1c;
+  --card: rgba(255, 255, 255, .05);
+  --card-2: rgba(255, 255, 255, .09);
+  --line: rgba(255, 255, 255, .11);
+  --text: #eaf0ff;
+  --muted: #98a4c8;
+  --accent: #8b7bff;      /* violet néon */
+  --accent-2: #22d3ee;    /* cyan néon */
+  --green: #34e5b0;
+  --red: #ff6b81;
+  --orange: #ffc04d;
+  --glow: 0 0 24px rgba(139, 123, 255, .45);
+  --radius: 20px;
+}
+:root[data-theme="light"] {
+  --bg: #eef1fb;
+  --bg-soft: #ffffff;
+  --card: rgba(255, 255, 255, .70);
+  --card-2: rgba(20, 30, 70, .06);
+  --line: rgba(20, 30, 70, .12);
+  --text: #141c33;
+  --muted: #5f6a8c;
+}
+
+/* Fond nuit avec halos néon, fixés derrière tout le contenu translucide */
+body {
+  background:
+    radial-gradient(85% 55% at 12% -5%, rgba(139, 123, 255, .22), transparent 60%),
+    radial-gradient(75% 50% at 105% 108%, rgba(34, 211, 238, .16), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+}
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(85% 55% at 12% -5%, rgba(139, 123, 255, .16), transparent 60%),
+    radial-gradient(75% 50% at 105% 108%, rgba(34, 211, 238, .14), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Surfaces en verre dépoli (flou d'arrière-plan) */
+.card, .tx-item, .sheet, .flt-search, .field input, .field select, .r-select,
+.resil-area, .amount-input, .seg, .keypad button {
+  background: var(--card);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--line);
+}
+.card, .tx-item {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+.tx-item { transition: transform .12s, border-color .15s; }
+.tx-item:active { transform: scale(.99); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.tx-ico {
+  background: linear-gradient(145deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .02));
+  border: 1px solid rgba(255, 255, 255, .08);
+}
+
+/* Halo néon sur le solde principal et les blocs accentués */
+.hero {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  box-shadow: 0 16px 44px rgba(139, 123, 255, .45), 0 0 0 1px rgba(255, 255, 255, .08) inset;
+}
+
+/* Boutons : dégradé lumineux + halo */
+.btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 6px 22px rgba(139, 123, 255, .40);
+}
+.btn-2 {
+  background: var(--card-2);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  box-shadow: none;
+}
+.btn-danger { background: transparent; box-shadow: none; }
+
+/* Barre d'onglets : verre dépoli + liseré néon */
+.tabbar {
+  background: color-mix(in srgb, var(--bg-soft) 78%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+  border-top: 1px solid rgba(255, 255, 255, .10);
+  box-shadow: 0 -1px 0 rgba(139, 123, 255, .25);
+}
+.tab.active { color: var(--accent); text-shadow: 0 0 14px rgba(139, 123, 255, .7); }
+.tab-add-btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 8px 26px rgba(139, 123, 255, .7), 0 0 0 5px rgba(139, 123, 255, .12);
+}
+
+/* États sélectionnés lumineux */
+.cat-chip, .icon-chip { background: var(--card); }
+.cat-chip.sel, .icon-chip.sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: var(--glow);
+}
+.pin-dots span.filled { box-shadow: var(--glow); }
+.field input:focus, .field select:focus, .flt-search:focus,
+.lic-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 123, 255, .22); }
+
+/* Barres de budget et donut : néon */
+.bar { background: rgba(255, 255, 255, .07); }
+.bar-ok > i { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.month-bar { box-shadow: 0 0 12px rgba(139, 123, 255, .3); }
+
+/* Écran de verrouillage : halo cohérent */
+.lock {
+  background:
+    radial-gradient(90% 60% at 50% -10%, rgba(139, 123, 255, .28), transparent 60%),
+    radial-gradient(70% 50% at 100% 110%, rgba(34, 211, 238, .16), transparent 55%),
+    var(--bg);
+}
+.lock-logo { filter: drop-shadow(0 0 18px rgba(139, 123, 255, .6)); }
+.keypad button:active { box-shadow: var(--glow); }

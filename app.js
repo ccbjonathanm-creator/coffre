@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -464,7 +464,7 @@ function applyTheme() {
   const t = state?.settings?.theme || 'dark';
   document.documentElement.setAttribute('data-theme', t);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', t === 'light' ? '#f4f6fc' : '#0b0f1a');
+  if (meta) meta.setAttribute('content', t === 'light' ? '#eef1fb' : '#05060e');
 }
 
 // ---------------- Agrégations & intelligence ----------------
