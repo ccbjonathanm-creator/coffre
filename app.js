@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -448,6 +448,125 @@ function openLicenceSheet() {
   el('sheet-backdrop').classList.remove('hidden');
   el('sheet').classList.remove('hidden');
 }
+
+// ---------------- Générateur de licences (accès caché : appui long sur la version) ----------------
+// La clé privée n'est PAS dans le code. Le vendeur la colle une fois ; elle est chiffrée
+// (AES-GCM, mot de passe via PBKDF2) et gardée uniquement dans ce téléphone.
+const GEN_LS = 'coffre.genvault';
+let genSignKey = null;
+function genVault() { try { return JSON.parse(localStorage.getItem(GEN_LS)); } catch (e) { return null; } }
+async function genEncrypt(privStr, pw) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(pw, salt, 310000);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(privStr));
+  return { v: 1, salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+}
+async function genDecrypt(vault, pw) {
+  const key = await deriveKey(pw, fromB64(vault.salt), 310000);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(vault.iv) }, key, fromB64(vault.ct));
+  return dec.decode(pt);
+}
+function genImportSign(privStr) {
+  return crypto.subtle.importKey('jwk', JSON.parse(privStr), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+}
+async function genMakeLicence(deviceId) {
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, genSignKey, enc.encode('coffre-licence:' + deviceId));
+  return b64(sig);
+}
+function openGeneratorSheet() {
+  genSignKey = null;
+  genRender(genVault() ? 'unlock' : 'setup');
+  el('sheet-backdrop').classList.remove('hidden');
+  el('sheet').classList.remove('hidden');
+}
+function genRender(screen) {
+  const sheet = el('sheet');
+  if (screen === 'setup') {
+    sheet.innerHTML = `
+      <div class="sheet-grip"></div>
+      <h2>🔑 Générateur — configuration</h2>
+      <p class="muted" style="font-size:13px;margin:-8px 0 14px">Première fois. Colle ta clé secrète et choisis un mot de passe maître. La clé sera chiffrée et gardée <b>uniquement sur ce téléphone</b>.</p>
+      <div class="field"><label>Clé secrète (fournie par Claude)</label>
+        <textarea id="gs-key" class="resil-area" rows="4" placeholder='{"key_ops":["sign"],...}'></textarea></div>
+      <div class="field"><label>Mot de passe maître</label>
+        <input id="gs-pw" type="password" placeholder="Un mot de passe fort"></div>
+      <div class="field"><label>Confirme le mot de passe</label>
+        <input id="gs-pw2" type="password" placeholder="Retape-le"></div>
+      <button class="btn" id="gs-go">🔒 Chiffrer et enregistrer</button>
+      <p id="gs-err" class="lock-error" style="text-align:center"></p>`;
+    el('gs-go').addEventListener('click', genDoSetup);
+  } else if (screen === 'unlock') {
+    sheet.innerHTML = `
+      <div class="sheet-grip"></div>
+      <h2>🔑 Générateur</h2>
+      <div class="field"><label>Mot de passe maître</label>
+        <input id="gu-pw" type="password" placeholder="Ton mot de passe"></div>
+      <button class="btn" id="gu-go">Déverrouiller</button>
+      <p id="gu-err" class="lock-error" style="text-align:center"></p>
+      <button class="btn btn-2" id="gu-reset" style="margin-top:10px">Réinitialiser (effacer la clé de ce tél)</button>`;
+    el('gu-go').addEventListener('click', genDoUnlock);
+    el('gu-reset').addEventListener('click', () => {
+      if (confirm('Effacer la clé chiffrée de ce téléphone ?')) { localStorage.removeItem(GEN_LS); genSignKey = null; genRender('setup'); }
+    });
+  } else {
+    sheet.innerHTML = `
+      <div class="sheet-grip"></div>
+      <h2>🔑 Générer une licence</h2>
+      <div class="field"><label>Identifiant d'appareil du client</label>
+        <input id="gg-id" type="text" placeholder="XXXX-XXXX" maxlength="9" style="text-align:center;font-weight:800;letter-spacing:2px"></div>
+      <button class="btn" id="gg-go">Générer la clé</button>
+      <div id="gg-out" class="field hidden" style="margin-top:16px">
+        <label>Clé à donner au client</label>
+        <div id="gg-key" class="key" style="word-break:break-all;user-select:all;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:12px;padding:14px;font-family:monospace;font-size:13px"></div>
+        <button class="btn btn-2" id="gg-copy" style="margin-top:10px">📋 Copier la clé</button>
+        <p id="gg-ok" class="ok" style="color:var(--green);font-size:13px;text-align:center"></p>
+      </div>
+      <p id="gg-err" class="lock-error" style="text-align:center"></p>
+      <button class="btn btn-2" id="gg-lock" style="margin-top:10px">🔒 Verrouiller</button>`;
+    el('gg-id').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); });
+    el('gg-go').addEventListener('click', genDoGenerate);
+    el('gg-lock').addEventListener('click', () => { genSignKey = null; genRender('unlock'); });
+  }
+}
+async function genDoSetup() {
+  const err = el('gs-err'); err.textContent = '';
+  const raw = el('gs-key').value.trim();
+  const pw = el('gs-pw').value, pw2 = el('gs-pw2').value;
+  let jwk;
+  try { jwk = JSON.parse(raw); } catch (e) { err.textContent = 'Clé illisible (JSON invalide).'; return; }
+  if (jwk.x !== LICENCE_PUBKEY.x || jwk.y !== LICENCE_PUBKEY.y || !jwk.d) { err.textContent = "Cette clé ne correspond pas à Coffre."; return; }
+  if (pw.length < 8) { err.textContent = 'Mot de passe : 8 caractères minimum (idéalement une longue phrase).'; return; }
+  if (pw !== pw2) { err.textContent = 'Les deux mots de passe diffèrent.'; return; }
+  try {
+    genSignKey = await genImportSign(raw);
+    localStorage.setItem(GEN_LS, JSON.stringify(await genEncrypt(raw, pw)));
+    genRender('generate');
+  } catch (e) { err.textContent = 'Erreur : ' + e.message; }
+}
+async function genDoUnlock() {
+  const err = el('gu-err'); err.textContent = '';
+  const v = genVault(); if (!v) { genRender('setup'); return; }
+  try {
+    genSignKey = await genImportSign(await genDecrypt(v, el('gu-pw').value));
+    genRender('generate');
+  } catch (e) { err.textContent = 'Mot de passe incorrect.'; }
+}
+async function genDoGenerate() {
+  const err = el('gg-err'); err.textContent = ''; el('gg-out').classList.add('hidden');
+  const id = el('gg-id').value.trim().toUpperCase();
+  if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(id)) { err.textContent = 'Identifiant invalide. Format : XXXX-XXXX.'; return; }
+  if (!genSignKey) { genRender('unlock'); return; }
+  try {
+    el('gg-key').textContent = await genMakeLicence(id);
+    el('gg-out').classList.remove('hidden');
+    el('gg-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText(el('gg-key').textContent); el('gg-ok').textContent = 'Copié ✓'; }
+      catch (e) { el('gg-ok').textContent = 'Sélectionne et copie la clé.'; }
+    };
+  } catch (e) { err.textContent = 'Erreur : ' + e.message; }
+}
+
 function trialBanner() {
   if (licensed) return '';
   const ti = trialInfo();
@@ -1490,7 +1609,7 @@ function viewSettings() {
       <div class="set-desc" style="margin-top:10px">🔒 Une mise à jour <b>n'efface jamais</b> tes opérations ni tes réglages. Elle ne remplace que l'application.</div>
     </div>
 
-    <p class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre ${APP_VERSION} • 100% hors-ligne • chiffré AES-256</p>
+    <p id="ver-foot" class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre ${APP_VERSION} • 100% hors-ligne • chiffré AES-256</p>
   `;
 }
 
@@ -1603,6 +1722,21 @@ function bindSettings() {
   el('clear-tx').addEventListener('click', clearTransactions);
   el('wipe').addEventListener('click', wipeAll);
   el('do-update')?.addEventListener('click', doAppUpdate);
+  bindLongPress(el('ver-foot'), openGeneratorSheet);   // accès caché au générateur de licences
+}
+// Détecte un appui long (700 ms) sur un élément, souris et tactile.
+function bindLongPress(node, cb, ms) {
+  if (!node) return;
+  let t = null;
+  const start = () => { t = setTimeout(() => { t = null; cb(); }, ms || 700); };
+  const cancel = () => { if (t) { clearTimeout(t); t = null; } };
+  node.addEventListener('touchstart', start, { passive: true });
+  node.addEventListener('touchend', cancel);
+  node.addEventListener('touchmove', cancel, { passive: true });
+  node.addEventListener('mousedown', start);
+  node.addEventListener('mouseup', cancel);
+  node.addEventListener('mouseleave', cancel);
+  node.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 // ---------------- Feuille : ajout / édition d'opération ----------------
