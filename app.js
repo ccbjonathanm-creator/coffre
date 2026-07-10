@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v28';
+const APP_VERSION = 'v29';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -749,22 +749,49 @@ function learnRule(note, cat, type) {
   state.rules[key] = cat;
   return key;   // la signature retenue (un ou plusieurs mots)
 }
+// Signature discriminante pour une icône : comme ruleSignature, mais on distingue le
+// libellé des opérations qui affichent DÉJÀ une autre icône (ex : mettre l'icône essence
+// sur "Intermarché station service" ne doit pas toucher les courses Intermarché).
+function iconSignature(note, slug) {
+  const toks = sigTokens(note);
+  if (!toks.length) return null;
+  const others = state.transactions
+    .filter((t) => t.type === 'expense' && txIconSlug(t) !== slug)
+    .map((t) => normTxt(t.note));
+  const capturesOther = (sig) => others.some((n) => sig.every((w) => kwMatch(n, w)));
+  const chosen = [toks[0]];
+  for (let i = 1; i < toks.length && capturesOther(chosen); i++) chosen.push(toks[i]);
+  return chosen.join(' ');
+}
 // Retient l'icône choisie pour un marchand (Steam -> manette) et la retire si on repasse en Auto.
 function learnIconRule(note, slug) {
-  const kw = merchantKeyword(note);
-  if (!kw) return null;
   state.iconRules = state.iconRules || {};
-  if (slug) state.iconRules[kw] = slug;
-  else delete state.iconRules[kw];
-  return kw;
+  if (slug) {
+    const key = iconSignature(note, slug);
+    if (!key) return null;
+    state.iconRules[key] = slug;
+    return key;
+  }
+  // Repasse en Auto : on retire toute règle d'icône dont la signature matche ce libellé.
+  const n = normTxt(note);
+  let removed = null;
+  for (const kw of Object.keys(state.iconRules)) {
+    if (ruleMatch(n, kw)) { delete state.iconRules[kw]; removed = kw; }
+  }
+  return removed;
 }
-// Icône apprise pour ce libellé, s'il correspond à un marchand connu.
+// Icône apprise pour ce libellé : la règle la PLUS SPÉCIFIQUE (le plus de mots) gagne.
 function iconFromRules(note) {
   const n = normTxt(note);
   if (!n) return null;
   const rules = (state && state.iconRules) || {};
-  for (const kw in rules) { if (kw && kwMatch(n, kw)) return rules[kw]; }
-  return null;
+  let best = null, bestLen = 0;
+  for (const kw in rules) {
+    if (!kw || !ruleMatch(n, kw)) continue;
+    const len = kw.split(' ').length;
+    if (len > bestLen) { best = rules[kw]; bestLen = len; }
+  }
+  return best;
 }
 // Corrige d'un coup toutes les opérations déjà présentes qui correspondent au même marchand.
 function applyRuleToExisting(keyword, cat, type, exceptId) {
@@ -2091,7 +2118,11 @@ async function saveTx() {
       // La règle marchand pilote TOUT : on retire les icônes figées de toutes ses opérations
       // (y compris celles changées à la main avant) pour qu'elles suivent la règle uniformément.
       for (const t of state.transactions) {
-        if (t.type === 'expense' && kwMatch(normTxt(t.note), kw)) { delete t.icon; iconApplied++; }
+        // On ne libère l'icône figée que si cette règle est bien la plus spécifique pour
+        // ce libellé (sinon on laisse une règle plus fine gouverner son marchand).
+        if (t.type === 'expense' && ruleMatch(normTxt(t.note), kw) && iconFromRules(t.note) === draft.icon) {
+          delete t.icon; iconApplied++;
+        }
       }
     }
   }
