@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v14';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -191,6 +191,8 @@ function defaultState() {
     transactions: [],
     budgets: {},
     recurring: [],   // opérations récurrentes : { id, type, amount, category, note, day }
+    aboManuel: [],   // abonnements ajoutés à la main : { id, cle, marchand, montant, frequence, categorie }
+    aboIgnore: {},   // abonnements auto-détectés écartés : { cle: true }
     rules: {},   // marchands appris : { motclé: catégorie }
     settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0, budgetRollover: false },
   };
@@ -693,6 +695,84 @@ function detecterAbonnements(opts = {}) {
   return abos;
 }
 
+// Fréquences proposées pour un abonnement ajouté à la main.
+const FREQS = [
+  { id: 'hebdomadaire', label: 'Hebdo', parAn: 52 },
+  { id: 'mensuel', label: 'Mensuel', parAn: 12 },
+  { id: 'bimestriel', label: 'Tous les 2 mois', parAn: 6 },
+  { id: 'trimestriel', label: 'Trimestriel', parAn: 4 },
+  { id: 'annuel', label: 'Annuel', parAn: 1 },
+];
+function freqParAn(f) {
+  const m = { hebdomadaire: 52, bimensuel: 26, mensuel: 12, bimestriel: 6, trimestriel: 4, annuel: 1 };
+  return m[f] || 12;
+}
+
+// Marchands distincts tirés des dépenses (pour pré-remplir une récurrence ou repérer un abo).
+function merchantsFromTx() {
+  const groups = {};
+  for (const t of (state.transactions || [])) {
+    if (t.type !== 'expense') continue;
+    const k = merchantKey(t.note);
+    if (!k) continue;
+    (groups[k] = groups[k] || []).push(t);
+  }
+  return Object.entries(groups).map(([k, txs]) => {
+    txs.sort((a, b) => (a.date < b.date ? 1 : -1));
+    const montants = txs.map((t) => t.amount);
+    const catCount = {};
+    txs.forEach((t) => { catCount[t.category] = (catCount[t.category] || 0) + 1; });
+    const categorie = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0][0];
+    return { cle: k, label: txs[0].note.trim(), montant: round2(median(montants)), categorie, count: txs.length };
+  }).sort((a, b) => b.count - a.count);
+}
+
+// Enrichit un abonnement ajouté à la main avec ses vraies occurrences (si présentes).
+function enrichManuel(m) {
+  const parAn = freqParAn(m.frequence);
+  const occ = [];
+  if (m.cle) {
+    for (const t of (state.transactions || [])) {
+      if (t.type === 'expense' && merchantKey(t.note) === m.cle) occ.push(t);
+    }
+  }
+  occ.sort((a, b) => (a.date < b.date ? -1 : 1));
+  const montants = occ.map((t) => t.amount);
+  const montant = montants.length ? round2(median(montants)) : round2(m.montant);
+  const dernier = occ.length ? occ[occ.length - 1].date : null;
+  const premier = occ.length ? occ[0].date : null;
+  const actif = dernier ? daysBetween(dernier, new Date()) <= (365 / parAn) * 1.8 : true;
+  return {
+    marchand: m.marchand, cle: m.cle, montant, frequence: m.frequence,
+    coutAnnuel: round2(montant * parAn), occurrences: occ.length,
+    totalPaye: round2(montants.reduce((s, x) => s + x, 0)),
+    premier, dernier, categorie: m.categorie, actif,
+    manuel: true, manuelId: m.id,
+  };
+}
+
+// La liste complète de la Liste noire = auto-détectés + ajoutés à la main, moins les écartés.
+function collectAbonnements() {
+  const ignore = state.aboIgnore || {};
+  const manuel = state.aboManuel || [];
+  const manuelCles = new Set(manuel.map((m) => m.cle).filter(Boolean));
+  const auto = detecterAbonnements();
+
+  const list = [];
+  for (const a of auto) {
+    if (ignore[a.cle] || manuelCles.has(a.cle)) continue;
+    list.push(Object.assign({}, a, { manuel: false, uid: 'a:' + a.cle }));
+  }
+  for (const m of manuel) {
+    const e = enrichManuel(m);
+    e.uid = 'm:' + m.id;
+    list.push(e);
+  }
+  list.sort((a, b) => b.coutAnnuel - a.coutAnnuel);
+  const ignores = auto.filter((a) => ignore[a.cle]);
+  return { list, ignores };
+}
+
 // ---------------- Vues ----------------
 function render() {
   const v = el('view');
@@ -1006,11 +1086,6 @@ function viewBudgets() {
 
 // ---------------- Vue : Liste noire (abonnements) ----------------
 function viewAbos() {
-  const ignore = state.aboIgnore || {};
-  const tous = detecterAbonnements();
-  const liste = tous.filter((a) => !ignore[a.cle]);
-  const ignores = tous.filter((a) => ignore[a.cle]);
-
   if (!state.transactions.length) {
     return `<div class="section-title">🎯 Liste noire</div>
       <div class="card muted" style="font-size:13px">
@@ -1018,7 +1093,14 @@ function viewAbos() {
         ensuite tout seul tes abonnements récurrents et je les chiffre à l'année.
       </div>`;
   }
-  if (!liste.length) {
+  const { list, ignores } = collectAbonnements();
+  const aideManuel = `
+    <div class="card muted" style="font-size:12px">
+      💡 Un abonnement manque à l'appel (mensualité d'assurance, forfait mobile…) ?
+      Ouvre la dépense dans l'onglet <b>Opérations</b> et touche « 🎯 Marquer comme abonnement ».
+    </div>`;
+
+  if (!list.length) {
     return `<div class="section-title">🎯 Liste noire</div>
       <div class="card" style="text-align:center;padding:24px">
         <div style="font-size:40px">✅</div>
@@ -1027,10 +1109,11 @@ function viewAbos() {
           Il me faut au moins 3 prélèvements réguliers du même marchand, à montant stable, pour flairer un abonnement.
         </div>
       </div>
+      ${aideManuel}
       ${ignores.length ? aboIgnoresHtml(ignores) : ''}`;
   }
 
-  const actifs = liste.filter((a) => a.actif);
+  const actifs = list.filter((a) => a.actif);
   const totalAn = round2(actifs.reduce((s, a) => s + a.coutAnnuel, 0));
   const totalMois = round2(totalAn / 12);
 
@@ -1041,20 +1124,25 @@ function viewAbos() {
       <div style="font-size:13px;opacity:.95">soit ${euro(totalMois)} par mois · ${actifs.length} abonnement(s) actif(s)</div>
     </div>`;
 
-  const cards = liste.map((a) => {
+  const cards = list.map((a) => {
     const c = catById(a.categorie);
     const badge = a.actif
       ? '<span class="abo-badge on">Actif</span>'
       : '<span class="abo-badge off">Inactif</span>';
+    const manTag = a.manuel ? '<span class="abo-badge man">ajouté</span>' : '';
+    const sub = `${euro(a.montant)} · ${a.frequence}`
+      + (a.occurrences ? ` · ${a.occurrences} prélèvement(s)` : '')
+      + (a.premier ? ` · depuis ${frDate(a.premier)}` : '');
+    const action2 = a.manuel
+      ? `<button class="btn btn-2 abo-btn" data-removeabo="${escapeHtml(a.manuelId)}">Retirer</button>`
+      : `<button class="btn btn-2 abo-btn" data-noabo="${escapeHtml(a.cle)}">Pas un abonnement</button>`;
     return `
       <div class="card abo-card">
         <div class="abo-top">
           <div class="tx-ico">${c.emoji}</div>
           <div style="flex:1;min-width:0">
-            <div class="abo-name">${escapeHtml(a.marchand)} ${badge}</div>
-            <div class="muted" style="font-size:12px">
-              ${euro(a.montant)} · ${a.frequence} · ${a.occurrences} prélèvements · depuis ${frDate(a.premier)}
-            </div>
+            <div class="abo-name"><span class="abo-name-txt">${escapeHtml(a.marchand)}</span>${badge}${manTag}</div>
+            <div class="muted" style="font-size:12px">${sub}</div>
           </div>
           <div style="text-align:right">
             <div class="abo-cost">${euro(a.coutAnnuel)}</div>
@@ -1062,8 +1150,8 @@ function viewAbos() {
           </div>
         </div>
         <div class="abo-actions">
-          <button class="btn btn-danger abo-btn" data-resil="${escapeHtml(a.cle)}">✍️ Résilier</button>
-          <button class="btn btn-2 abo-btn" data-noabo="${escapeHtml(a.cle)}">Pas un abonnement</button>
+          <button class="btn btn-danger abo-btn" data-resil="${escapeHtml(a.uid)}">✍️ Résilier</button>
+          ${action2}
         </div>
       </div>`;
   }).join('');
@@ -1075,6 +1163,7 @@ function viewAbos() {
       Détection locale sur tes opérations. Un abonnement mal classé ? Touche « Pas un abonnement », il disparaît de la liste.
     </div>
     ${cards}
+    ${aideManuel}
     ${ignores.length ? aboIgnoresHtml(ignores) : ''}`;
 }
 
@@ -1097,6 +1186,11 @@ function bindAbos() {
       state.aboIgnore[n.getAttribute('data-noabo')] = true;
       await save(); render(); toast('Écarté de la liste noire');
     }));
+  document.querySelectorAll('[data-removeabo]').forEach((n) =>
+    n.addEventListener('click', async () => {
+      state.aboManuel = (state.aboManuel || []).filter((m) => m.id !== n.getAttribute('data-removeabo'));
+      await save(); render(); toast('Retiré des abonnements');
+    }));
   document.querySelectorAll('[data-restore]').forEach((n) =>
     n.addEventListener('click', async () => {
       if (state.aboIgnore) delete state.aboIgnore[n.getAttribute('data-restore')];
@@ -1106,9 +1200,9 @@ function bindAbos() {
     n.addEventListener('click', () => openResiliationSheet(n.getAttribute('data-resil'))));
 }
 
-// Lettre de résiliation type (100% locale, générée à partir du marchand détecté).
-function openResiliationSheet(cle) {
-  const a = detecterAbonnements().find((x) => x.cle === cle);
+// Lettre de résiliation type (100% locale, générée à partir du marchand).
+function openResiliationSheet(uid) {
+  const a = collectAbonnements().list.find((x) => x.uid === uid);
   if (!a) return;
   const nom = cleanMerchant(a.marchand);
   const lettre =
@@ -1157,6 +1251,66 @@ Dans l'attente, je vous prie d'agréer, Madame, Monsieur, l'expression de mes sa
   el('resil-close').addEventListener('click', closeSheet);
   el('sheet-backdrop').classList.remove('hidden');
   el('sheet').classList.remove('hidden');
+}
+
+// ---------------- Feuille : marquer une dépense comme abonnement ----------------
+let aboFlagDraft = null;
+function openAboFlagSheet(txId) {
+  const tx = state.transactions.find((t) => t.id === txId);
+  if (!tx) return;
+  aboFlagDraft = {
+    cle: merchantKey(tx.note),
+    marchand: tx.note.trim() || cleanMerchant(tx.note) || 'Abonnement',
+    montant: tx.amount,
+    categorie: tx.category,
+    frequence: 'mensuel',
+  };
+  renderAboFlagSheet();
+  el('sheet-backdrop').classList.remove('hidden');
+  el('sheet').classList.remove('hidden');
+}
+function renderAboFlagSheet() {
+  const d = aboFlagDraft;
+  const sheet = el('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-grip"></div>
+    <h2>Ajouter aux abonnements</h2>
+    <p class="muted" style="font-size:13px;margin:-8px 0 16px">
+      <b>${escapeHtml(cleanMerchant(d.marchand))}</b> · ${euro(d.montant)}
+    </p>
+    <div class="field">
+      <label>À quelle fréquence est-il prélevé ?</label>
+      <div class="cat-grid" id="freq-grid">
+        ${FREQS.map((f) => `<button class="cat-chip ${f.id === d.frequence ? 'sel' : ''}" data-freq="${f.id}">${f.label}</button>`).join('')}
+      </div>
+    </div>
+    <button class="btn" id="abo-flag-save">🎯 Ajouter à la liste noire</button>
+    <button class="btn btn-2" id="abo-flag-cancel" style="margin-top:10px">Annuler</button>
+  `;
+  sheet.querySelectorAll('[data-freq]').forEach((n) =>
+    n.addEventListener('click', () => {
+      d.frequence = n.getAttribute('data-freq');
+      document.querySelectorAll('#freq-grid [data-freq]').forEach((x) =>
+        x.classList.toggle('sel', x.getAttribute('data-freq') === d.frequence));
+    }));
+  el('abo-flag-save').addEventListener('click', saveAboFlag);
+  el('abo-flag-cancel').addEventListener('click', closeSheet);
+}
+async function saveAboFlag() {
+  const d = aboFlagDraft;
+  state.aboManuel = state.aboManuel || [];
+  if (d.cle && state.aboManuel.some((m) => m.cle === d.cle)) {
+    closeSheet(); switchTab('abos'); toast('Déjà dans tes abonnements'); return;
+  }
+  if (d.cle && state.aboIgnore) delete state.aboIgnore[d.cle]; // s'il avait été écarté, on le réactive
+  state.aboManuel.push({
+    id: crypto.randomUUID(), cle: d.cle, marchand: d.marchand,
+    montant: round2(d.montant), frequence: d.frequence, categorie: d.categorie,
+  });
+  await save();
+  closeSheet();
+  switchTab('abos');
+  toast('Ajouté à la liste noire ✓');
 }
 
 // Nettoie un libellé bancaire pour un courrier : enlève les mots parasites (PRLV, SEPA, CB...)
@@ -1413,6 +1567,7 @@ function renderSheet() {
       <input id="f-date" type="date" value="${draft.date}" max="${todayISO()}">
     </div>
     <button class="btn" id="f-save">${editingId ? 'Enregistrer' : 'Ajouter'}</button>
+    ${editingId && draft.type === 'expense' ? '<button class="btn btn-2" id="f-abo" style="margin-top:10px">🎯 Marquer comme abonnement</button>' : ''}
     ${editingId ? '<button class="btn btn-danger" id="f-delete" style="margin-top:10px">Supprimer</button>' : ''}
   `;
 
@@ -1434,6 +1589,7 @@ function renderSheet() {
     }
   });
   el('f-save').addEventListener('click', saveTx);
+  el('f-abo')?.addEventListener('click', () => openAboFlagSheet(editingId));
   el('f-delete')?.addEventListener('click', deleteTx);
 }
 function highlightCat(id) {
@@ -1541,6 +1697,14 @@ function renderRecurringSheet() {
       <button id="rseg-exp" class="${rdraft.type === 'expense' ? 'on-exp' : ''}">Dépense</button>
       <button id="rseg-inc" class="${rdraft.type === 'income' ? 'on-inc' : ''}">Revenu</button>
     </div>
+    ${(!editRecurId && rdraft.type === 'expense' && merchantsFromTx().length) ? `
+    <div class="field">
+      <label>Pré-remplir depuis une dépense existante</label>
+      <select id="r-pick" class="r-select">
+        <option value="">— saisie manuelle —</option>
+        ${merchantsFromTx().map((m) => `<option value="${escapeHtml(m.cle)}">${escapeHtml(cleanMerchant(m.label))} · ${euro(m.montant)} · ${m.count}x</option>`).join('')}
+      </select>
+    </div>` : ''}
     <div class="field">
       <input id="r-amount" class="amount-input" type="text" inputmode="decimal" placeholder="0,00" value="${rdraft.amount ? String(rdraft.amount).replace('.', ',') : ''}">
     </div>
@@ -1563,6 +1727,15 @@ function renderRecurringSheet() {
   `;
   el('rseg-exp').addEventListener('click', () => { rdraft.type = 'expense'; syncRDraft(); renderRecurringSheet(); });
   el('rseg-inc').addEventListener('click', () => { rdraft.type = 'income'; syncRDraft(); renderRecurringSheet(); });
+  el('r-pick')?.addEventListener('change', (e) => {
+    const m = merchantsFromTx().find((x) => x.cle === e.target.value);
+    if (!m) return;
+    syncRDraft();
+    rdraft.amount = m.montant;
+    rdraft.note = cleanMerchant(m.label);
+    rdraft.category = m.categorie;
+    renderRecurringSheet();
+  });
   sheet.querySelectorAll('[data-rcat]').forEach((n) =>
     n.addEventListener('click', () => {
       rdraft.category = n.getAttribute('data-rcat');
