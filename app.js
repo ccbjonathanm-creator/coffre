@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -197,7 +197,9 @@ function defaultState() {
     aboIgnore: {},   // abonnements auto-détectés écartés : { cle: true }
     rules: {},   // marchands appris : { motclé: catégorie }
     iconRules: {},   // icônes apprises par marchand : { motclé: slug d'icône }
-    settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0, budgetRollover: false },
+    // startBalance : solde réel du compte à la date startBalanceDate (avant les opérations
+    // qui suivent). Sert à afficher le VRAI solde du compte, pas seulement la somme des opérations.
+    settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0, budgetRollover: false, startBalance: null, startBalanceDate: '' },
   };
 }
 
@@ -971,12 +973,24 @@ function render() {
   bindView();
 }
 
+// Vrai solde du compte = solde de départ (tel qu'affiché par la banque à une date)
+// + toutes les opérations POSTÉRIEURES à cette date. Retourne null si non configuré.
+// Comparaison de dates en chaîne YYYY-MM-DD (l'ordre lexical = ordre chronologique).
+function accountBalance() {
+  const s = state.settings;
+  if (s.startBalance == null || !s.startBalanceDate) return null;
+  const delta = state.transactions.reduce((acc, t) =>
+    t.date > s.startBalanceDate ? acc + (t.type === 'expense' ? -t.amount : t.amount) : acc, 0);
+  return round2(s.startBalance + delta);
+}
+
 function viewDashboard() {
   const mk = thisMonth();
   const cur = txOfMonth(mk);
   const income = sumBy(cur, 'income');
   const expense = sumBy(cur, 'expense');
   const balance = round2(income - expense);
+  const acct = accountBalance();
   const monthLabel = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
   // reste à vivre / jour : basé sur les revenus (ce qui reste réellement pour vivre),
@@ -1050,13 +1064,16 @@ function viewDashboard() {
     </div>
 
     <div class="hero">
-      <p class="hero-label">Solde du mois</p>
-      <p class="hero-amount">${euro(balance)}</p>
+      <p class="hero-label">${acct !== null ? 'Solde du compte' : 'Solde du mois'}</p>
+      <p class="hero-amount">${euro(acct !== null ? acct : balance)}</p>
       <div class="hero-row">
-        <div class="hero-stat"><p class="l">↓ Revenus</p><p class="v">${euro(income)}</p></div>
-        <div class="hero-stat"><p class="l">↑ Dépenses</p><p class="v">${euro(expense)}</p></div>
+        <div class="hero-stat"><p class="l">↓ Revenus du mois</p><p class="v">${euro(income)}</p></div>
+        <div class="hero-stat"><p class="l">↑ Dépenses du mois</p><p class="v">${euro(expense)}</p></div>
       </div>
     </div>
+    ${acct === null ? `<div class="card muted" style="font-size:13px;margin-top:12px">
+      🏦 Pour afficher le <b>vrai solde de ton compte</b>, indique ton <b>solde de départ</b> dans Réglages → Solde du compte. Sinon Coffre ne connaît pas ce qu'il y avait avant tes opérations et le total ne correspond pas à ta banque.
+    </div>` : ''}
 
     <div style="height:14px"></div>
     ${safeBlock}
@@ -1576,6 +1593,20 @@ function viewSettings() {
       <button class="btn btn-2" id="add-recurring" style="margin-top:12px">➕ Ajouter une récurrence</button>
     </div>
 
+    <div class="section-title">Solde du compte</div>
+    <div class="card">
+      <div class="set-desc" style="margin-bottom:12px">Reporte le <b>solde exact affiché par ta banque</b> à une date, <b>avant</b> les opérations qui suivent (par ex. le dernier solde connu juste avant ta première opération importée). Coffre ajoute ensuite tes opérations des jours suivants pour afficher ton <b>vrai solde de compte</b>.</div>
+      <div class="set-row">
+        <div><div class="set-label">💰 Solde de départ</div></div>
+        <input id="start-balance" type="text" inputmode="decimal" value="${s.startBalance != null ? s.startBalance : ''}" placeholder="0" style="width:120px;text-align:right;padding:10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
+      </div>
+      <div class="set-row">
+        <div><div class="set-label">📅 À cette date</div><div class="set-desc">Solde de ce jour-là, avant les opérations suivantes</div></div>
+        <input id="start-date" type="date" value="${s.startBalanceDate || ''}" max="${todayISO()}" style="padding:10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
+      </div>
+      <button class="btn btn-2" id="save-start" style="margin-top:12px">Enregistrer le solde de départ</button>
+    </div>
+
     <div class="section-title">Importer un relevé</div>
     <div class="card">
       <div class="set-desc" style="margin-bottom:12px">Importe le fichier <b>Excel (.xlsx), CSV ou PDF</b> exporté depuis ta banque. Il est lu <b>sur ton téléphone</b>, jamais envoyé ailleurs. Tu vérifies tout avant de valider, et les doublons sont ignorés. <b>Excel reste le plus fiable</b> ; le PDF marche mais vérifie bien l'aperçu.</div>
@@ -1709,6 +1740,22 @@ function bindSettings() {
     const v = parseFloat(e.target.value.replace(',', '.'));
     state.settings.monthlyIncome = isNaN(v) ? 0 : round2(v);
     await save(); toast('Enregistré');
+  });
+  el('save-start').addEventListener('click', async () => {
+    const raw = el('start-balance').value.trim();
+    const date = el('start-date').value;
+    if (raw === '' || !date) {
+      // champs vidés : on efface le solde de départ (revient à la somme des opérations)
+      state.settings.startBalance = null;
+      state.settings.startBalanceDate = '';
+      await save(); render(); toast('Solde de départ effacé');
+      return;
+    }
+    const v = parseFloat(raw.replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(v)) { toast('Montant invalide'); return; }
+    state.settings.startBalance = round2(v);
+    state.settings.startBalanceDate = date;
+    await save(); render(); toast('Solde de départ enregistré');
   });
   el('open-licence').addEventListener('click', openLicenceSheet);
   el('lock-now').addEventListener('click', lockApp);
