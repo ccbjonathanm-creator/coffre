@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -732,10 +732,15 @@ function freqParAn(f) {
   return m[f] || 12;
 }
 
-// Palette d'icônes assignables à une opération (purement visuel, ne change PAS la catégorie).
-const ICON_CHOICES = ['🛡️', '🔁', '💸', '🏦', '🏠', '🚗', '⛽', '🧾', '💡', '💧', '📱', '📶',
-  '📺', '🎵', '🎮', '🛒', '🍔', '☕', '💊', '🏋️', '✈️', '🎁', '💼', '🐖', '🚬', '👕', '🍺',
-  '🐾', '💳', '🎰', '⚕️', '🩺', '🏥', '🎓', '🐟', '🔧', '📦'];
+// Palette d'icônes 3D assignables à une opération (purement visuel, ne change PAS la catégorie).
+const ICON_CHOICES = ['shield', 'repeat', 'moneywings', 'bank', 'house', 'car', 'fuel', 'receipt',
+  'bulb', 'droplet', 'phone', 'antenna', 'tv', 'music', 'game', 'cart', 'burger', 'coffee', 'pill',
+  'trophy', 'plane', 'gift', 'briefcase', 'pig', 'cigarette', 'coat', 'beer', 'paw', 'card', 'slot',
+  'medical', 'stetho', 'hospital', 'grad', 'fish', 'wrench', 'package'];
+// Icônes 3D (Fluent, embarquées localement). L'icône d'une opération = icône perso sinon catégorie.
+function iconSrc(slug) { return 'icons/i3d/' + slug + '.png'; }
+function iconImg(slug) { return '<img class="ic3d" src="' + iconSrc(slug) + '" alt="" loading="lazy">'; }
+function txIconSlug(t) { return (t && t.icon) || (t && t.category) || 'autres'; }
 
 // Marchands distincts tirés des dépenses (pour pré-remplir une récurrence ou repérer un abo).
 function merchantsFromTx() {
@@ -873,7 +878,7 @@ function viewDashboard() {
         const cls = r.type === 'expense' ? 'exp' : 'inc';
         const sign = r.type === 'expense' ? '-' : '+';
         return `<div class="tx-item" data-recpay="${r.id}" style="margin-bottom:6px">
-          <div class="tx-ico">${c.emoji}</div>
+          <div class="tx-ico">${iconImg(c.id)}</div>
           <div class="tx-main"><div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
           <div class="tx-note">prévu le ${r.day} · touche pour enregistrer</div></div>
           <div class="tx-amt ${cls}">${sign}${euro(r.amount)}</div>
@@ -916,16 +921,13 @@ function viewDashboard() {
 }
 
 // Icône affichée d'une opération : icône perso choisie à la main, sinon celle de la catégorie.
-function txEmoji(t) {
-  return (t && t.icon) || catById(t.category).emoji;
-}
 function txRow(t) {
   const c = catById(t.category);
   const cls = t.type === 'expense' ? 'exp' : 'inc';
   const sign = t.type === 'expense' ? '-' : '+';
   return `
     <div class="tx-item" data-edit="${t.id}">
-      <div class="tx-ico">${txEmoji(t)}</div>
+      <div class="tx-ico">${iconImg(txIconSlug(t))}</div>
       <div class="tx-main">
         <div class="tx-cat">${escapeHtml(c.name)}</div>
         <div class="tx-note">${escapeHtml(t.note || new Date(t.date).toLocaleDateString('fr-FR'))}</div>
@@ -1034,7 +1036,7 @@ function donutSvg(byCat, totalExp) {
     const c = catById(cat);
     legend += `<div class="legend-row">
       <span class="legend-dot" style="background:${color}"></span>
-      <span class="legend-name">${c.emoji} ${escapeHtml(c.name)}</span>
+      <span class="legend-name">${iconImg(c.id)} ${escapeHtml(c.name)}</span>
       <span class="legend-val">${Math.round(frac * 100)}%</span>
     </div>`;
   });
@@ -1092,7 +1094,7 @@ function viewBudgets() {
     return `
       <div class="budget-item" data-budget="${c.id}">
         <div class="budget-top">
-          <span class="budget-name">${c.emoji} ${c.name}</span>
+          <span class="budget-name">${iconImg(c.id)} ${c.name}</span>
           <span class="budget-val">${euro(used)} / ${euro(limit)}</span>
         </div>
         <div class="bar ${cls}"><i style="width:${pct}%"></i></div>
@@ -1177,7 +1179,7 @@ function viewAbos() {
     return `
       <div class="card abo-card">
         <div class="abo-top">
-          <div class="tx-ico">${c.emoji}</div>
+          <div class="tx-ico">${iconImg(c.id)}</div>
           <div style="flex:1;min-width:0">
             <div class="abo-name"><span class="abo-name-txt">${escapeHtml(a.marchand)}</span>${badge}${manTag}</div>
             <div class="muted" style="font-size:12px">${sub}</div>
@@ -1471,7 +1473,7 @@ function recurringListHtml() {
     const cls = r.type === 'expense' ? 'exp' : 'inc';
     const sign = r.type === 'expense' ? '-' : '+';
     return `<div class="tx-item" data-recur="${r.id}" style="margin-bottom:8px">
-      <div class="tx-ico">${c.emoji}</div>
+      <div class="tx-ico">${iconImg(c.id)}</div>
       <div class="tx-main">
         <div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
         <div class="tx-note">le ${r.day} de chaque mois · ${c.name}</div>
@@ -1608,7 +1610,7 @@ function renderSheet() {
     <div class="field">
       <label>Catégorie</label>
       <div class="cat-grid" id="cat-grid">
-        ${cats.map((c) => `<button class="cat-chip ${c.id === draft.category ? 'sel' : ''}" data-cat="${c.id}"><span class="e">${c.emoji}</span>${c.name}</button>`).join('')}
+        ${cats.map((c) => `<button class="cat-chip ${c.id === draft.category ? 'sel' : ''}" data-cat="${c.id}"><span class="e">${iconImg(c.id)}</span>${c.name}</button>`).join('')}
       </div>
     </div>
     <div class="field">
@@ -1619,7 +1621,7 @@ function renderSheet() {
       <label>Icône (facultatif, ne change pas la catégorie)</label>
       <div class="icon-grid" id="icon-grid">
         <button class="icon-chip auto ${!draft.icon ? 'sel' : ''}" data-icon="">Auto</button>
-        ${ICON_CHOICES.map((e) => `<button class="icon-chip ${draft.icon === e ? 'sel' : ''}" data-icon="${e}">${e}</button>`).join('')}
+        ${ICON_CHOICES.map((s) => `<button class="icon-chip ${draft.icon === s ? 'sel' : ''}" data-icon="${s}">${iconImg(s)}</button>`).join('')}
       </div>
     </div>
     <div class="field">
@@ -1716,7 +1718,7 @@ function openBudgetSheet() {
     <p class="muted" style="font-size:13px;margin-top:-8px;margin-bottom:16px">Laisse vide pour ne pas suivre une catégorie.</p>
     ${EXPENSE_CATS.map((c) => `
       <div class="field" style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <span style="flex:1;font-size:15px">${c.emoji} ${c.name}</span>
+        <span style="flex:1;font-size:15px;display:flex;align-items:center;gap:8px">${iconImg(c.id)} ${c.name}</span>
         <input data-bud="${c.id}" type="text" inputmode="decimal" placeholder="—"
           value="${state.budgets[c.id] || ''}"
           style="width:110px;text-align:right;padding:12px;border-radius:12px;background:var(--card);color:var(--text);border:1px solid var(--line)">
@@ -1778,7 +1780,7 @@ function renderRecurringSheet() {
     <div class="field">
       <label>Catégorie</label>
       <div class="cat-grid" id="rcat-grid">
-        ${cats.map((c) => `<button class="cat-chip ${c.id === rdraft.category ? 'sel' : ''}" data-rcat="${c.id}"><span class="e">${c.emoji}</span>${c.name}</button>`).join('')}
+        ${cats.map((c) => `<button class="cat-chip ${c.id === rdraft.category ? 'sel' : ''}" data-rcat="${c.id}"><span class="e">${iconImg(c.id)}</span>${c.name}</button>`).join('')}
       </div>
     </div>
     <div class="field">
@@ -2253,7 +2255,7 @@ function renderImportSheet() {
     const sign = p.type === 'expense' ? '-' : '+';
     const d = p.date.slice(8, 10) + '/' + p.date.slice(5, 7);
     return `<div class="tx-item" style="margin-bottom:8px">
-      <div class="tx-ico">${c.emoji}</div>
+      <div class="tx-ico">${iconImg(c.id)}</div>
       <div class="tx-main"><div class="tx-cat" style="font-size:13px">${escapeHtml(p.note || c.name)}</div>
       <div class="tx-note">${d} · ${c.name}</div></div>
       <div class="tx-amt ${cls}">${sign}${euro(p.amount)}</div>

@@ -281,6 +281,13 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .icon-chip.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .icon-chip:active { transform: scale(.9); }
 
+/* ---------------- Icônes 3D (Fluent, embarquées) ---------------- */
+.ic3d { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: -0.3em; }
+.tx-ico .ic3d { width: 30px; height: 30px; }
+.cat-chip .e .ic3d { width: 28px; height: 28px; vertical-align: 0; }
+.icon-chip .ic3d { width: 30px; height: 30px; vertical-align: 0; }
+.legend-name .ic3d, .budget-name .ic3d { width: 20px; height: 20px; }
+
 /* ---------------- Feuille modale ---------------- */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; animation: fade .2s; }
 .sheet {
