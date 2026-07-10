@@ -1,5 +1,5 @@
 /* Générateur Coffre — service worker : fonctionnement 100% hors-ligne. */
-const CACHE = 'coffregen-v1';
+const CACHE = 'coffregen-v2';
 const ASSETS = [
   './', './index.html', './styles.css', './gen.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/favicon-64.png',

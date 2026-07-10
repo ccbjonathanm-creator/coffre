@@ -7,11 +7,12 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v29';
+const APP_VERSION = 'v30';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
   device: 'coffre.device', install: 'coffre.install', hwm: 'coffre.hwm', licence: 'coffre.licence',
+  licemail: 'coffre.licemail',
 };
 // Licence : essai de 15 jours puis déblocage à vie par une clé signée liée à l'appareil.
 // L'appli ne connaît QUE la clé publique (elle vérifie). La clé privée reste dans l'outil
@@ -391,23 +392,27 @@ function trialInfo() {
   const leftMs = TRIAL_DAYS * 86400000 - (hwm - install);
   return { daysLeft: Math.max(0, Math.ceil(leftMs / 86400000)), expired: leftMs <= 0 };
 }
-async function verifyLicence(key, deviceId) {
-  if (!key) return false;
+// La clé de licence est la SIGNATURE de l'E-MAIL d'achat (normalisé). Elle marche
+// sur n'importe quel appareil et SURVIT à une désinstallation/réinstallation :
+// le client ressaisit son e-mail + sa clé. La clé privée n'est jamais dans l'app.
+const normEmail = (e) => (e || '').trim().toLowerCase();
+async function verifyLicence(key, email) {
+  if (!key || !email) return false;
   try {
     const pub = await crypto.subtle.importKey('jwk', LICENCE_PUBKEY, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
     return await crypto.subtle.verify(
-      { name: 'ECDSA', hash: 'SHA-256' }, pub, fromB64(key), enc.encode('coffre-licence:' + deviceId));
+      { name: 'ECDSA', hash: 'SHA-256' }, pub, fromB64(key), enc.encode('coffre-licence:' + normEmail(email)));
   } catch (e) { return false; }
 }
 async function refreshLicence() {
-  licensed = await verifyLicence(localStorage.getItem(LS.licence), getDeviceId());
+  licensed = await verifyLicence(localStorage.getItem(LS.licence), localStorage.getItem(LS.licemail));
   return licensed;
 }
-// Tente d'activer une clé saisie. Renvoie true si valide pour CET appareil.
-async function submitLicence(rawKey) {
+// Tente d'activer une clé saisie avec l'e-mail d'achat. Renvoie true si valide.
+async function submitLicence(email, rawKey) {
   const clean = (rawKey || '').trim().replace(/\s+/g, '');
-  const ok = await verifyLicence(clean, getDeviceId());
-  if (ok) { localStorage.setItem(LS.licence, clean); licensed = true; }
+  const ok = await verifyLicence(clean, email);
+  if (ok) { localStorage.setItem(LS.licence, clean); localStorage.setItem(LS.licemail, normEmail(email)); licensed = true; }
   return ok;
 }
 function showLicenceGate() {
@@ -415,9 +420,9 @@ function showLicenceGate() {
   el('lock-screen').classList.add('hidden');
   el('app').classList.add('hidden');
   closeSheet();
-  el('lic-device').textContent = getDeviceId();
   el('lic-error').textContent = '';
   el('lic-key').value = '';
+  const em = el('lic-email'); if (em) em.value = localStorage.getItem(LS.licemail) || '';
   el('licence-gate').classList.remove('hidden');
 }
 function openLicenceSheet() {
@@ -428,12 +433,12 @@ function openLicenceSheet() {
     <h2>Débloquer la version à vie</h2>
     <p class="muted" style="font-size:13px;margin:-8px 0 14px">${licensed
       ? 'Ta version à vie est déjà active. Merci ! ✓'
-      : `Version d'essai : <b>${ti.daysLeft} jour(s)</b> restant(s). Pour débloquer, communique ton identifiant au vendeur puis colle la clé reçue.`}</p>
-    <div class="field">
-      <label>Ton identifiant d'appareil</label>
-      <input id="ls-device" type="text" readonly value="${getDeviceId()}" style="font-weight:700;letter-spacing:1px">
-    </div>
+      : `Version d'essai : <b>${ti.daysLeft} jour(s)</b> restant(s). La clé est liée à ton e-mail : elle marche sur tous tes appareils, même après une réinstallation.`}</p>
     ${licensed ? '' : `
+    <div class="field">
+      <label>E-mail d'achat</label>
+      <input id="ls-email" type="email" placeholder="Ton e-mail d'achat" autocomplete="email" autocapitalize="off" spellcheck="false" value="${localStorage.getItem(LS.licemail) || ''}">
+    </div>
     <div class="field">
       <label>Clé de licence</label>
       <input id="ls-key" type="text" placeholder="Colle la clé reçue ici">
@@ -443,8 +448,10 @@ function openLicenceSheet() {
   `;
   if (!licensed) {
     el('ls-validate').addEventListener('click', async () => {
-      if (await submitLicence(el('ls-key').value)) { closeSheet(); render(); toast('Version à vie activée ✓ Merci !'); }
-      else el('ls-error').textContent = 'Clé invalide pour cet appareil.';
+      const email = el('ls-email').value.trim();
+      if (!email) { el('ls-error').textContent = 'Saisis ton e-mail d\'achat.'; return; }
+      if (await submitLicence(email, el('ls-key').value)) { closeSheet(); render(); toast('Version à vie activée ✓ Merci !'); }
+      else el('ls-error').textContent = 'E-mail ou clé incorrects.';
     });
   }
   el('sheet-backdrop').classList.remove('hidden');
@@ -472,8 +479,8 @@ async function genDecrypt(vault, pw) {
 function genImportSign(privStr) {
   return crypto.subtle.importKey('jwk', JSON.parse(privStr), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
 }
-async function genMakeLicence(deviceId) {
-  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, genSignKey, enc.encode('coffre-licence:' + deviceId));
+async function genMakeLicence(email) {
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, genSignKey, enc.encode('coffre-licence:' + normEmail(email)));
   return b64(sig);
 }
 function openGeneratorSheet() {
@@ -515,8 +522,8 @@ function genRender(screen) {
     sheet.innerHTML = `
       <div class="sheet-grip"></div>
       <h2>🔑 Générer une licence</h2>
-      <div class="field"><label>Identifiant d'appareil du client</label>
-        <input id="gg-id" type="text" placeholder="XXXX-XXXX" maxlength="9" style="text-align:center;font-weight:800;letter-spacing:2px"></div>
+      <div class="field"><label>E-mail d'achat du client</label>
+        <input id="gg-id" type="email" placeholder="client@mail.com" autocapitalize="off" spellcheck="false" style="text-align:center;font-weight:700"></div>
       <button class="btn" id="gg-go">Générer la clé</button>
       <div id="gg-out" class="field hidden" style="margin-top:16px">
         <label>Clé à donner au client</label>
@@ -526,7 +533,6 @@ function genRender(screen) {
       </div>
       <p id="gg-err" class="lock-error" style="text-align:center"></p>
       <button class="btn btn-2" id="gg-lock" style="margin-top:10px">🔒 Verrouiller</button>`;
-    el('gg-id').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); });
     el('gg-go').addEventListener('click', genDoGenerate);
     el('gg-lock').addEventListener('click', () => { genSignKey = null; genRender('unlock'); });
   }
@@ -556,8 +562,8 @@ async function genDoUnlock() {
 }
 async function genDoGenerate() {
   const err = el('gg-err'); err.textContent = ''; el('gg-out').classList.add('hidden');
-  const id = el('gg-id').value.trim().toUpperCase();
-  if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(id)) { err.textContent = 'Identifiant invalide. Format : XXXX-XXXX.'; return; }
+  const id = el('gg-id').value.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(id)) { err.textContent = 'E-mail invalide.'; return; }
   if (!genSignKey) { genRender('unlock'); return; }
   try {
     el('gg-key').textContent = await genMakeLicence(id);
@@ -2886,12 +2892,14 @@ function init() {
 
   // Écran de déblocage (essai terminé)
   el('lic-validate').addEventListener('click', async () => {
-    if (await submitLicence(el('lic-key').value)) {
+    const email = el('lic-email') ? el('lic-email').value.trim() : '';
+    if (!email) { el('lic-error').textContent = 'Saisis ton e-mail d\'achat.'; return; }
+    if (await submitLicence(email, el('lic-key').value)) {
       el('licence-gate').classList.add('hidden');
       toast('Version à vie activée ✓ Merci !');
       enterApp();
     } else {
-      el('lic-error').textContent = 'Clé invalide pour cet appareil.';
+      el('lic-error').textContent = 'E-mail ou clé incorrects.';
     }
   });
   el('lic-lock').addEventListener('click', lockApp);
