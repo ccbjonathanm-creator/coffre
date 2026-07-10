@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v18';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -196,6 +196,7 @@ function defaultState() {
     aboManuel: [],   // abonnements ajoutés à la main : { id, cle, marchand, montant, frequence, categorie }
     aboIgnore: {},   // abonnements auto-détectés écartés : { cle: true }
     rules: {},   // marchands appris : { motclé: catégorie }
+    iconRules: {},   // icônes apprises par marchand : { motclé: slug d'icône }
     settings: { theme: 'dark', autoLockMin: 3, monthlyIncome: 0, budgetRollover: false },
   };
 }
@@ -539,16 +540,38 @@ function guessCategory(note, type) {
 const RULE_STOPWORDS = new Set(['paiement', 'carte', 'cb', 'prlv', 'sepa', 'vir', 'virement', 'achat',
   'retrait', 'france', 'avec', 'pour', 'date', 'ref', 'sarl', 'sas', 'eurl', 'facture', 'mensuel',
   'client', 'clients', 'particuliers', 'recu', 'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par']);
-function learnRule(note, cat) {
+// Extrait le "marchand" d'un libellé : le token le plus significatif (celui qui revient
+// le plus souvent dans l'historique, une enseigne se répète ; à défaut le plus long).
+function merchantKeyword(note) {
   const tokens = normTxt(note).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !RULE_STOPWORDS.has(w));
   if (!tokens.length) return null;
-  // On retient le token le plus "marchand" : celui qui revient le plus souvent dans l'historique
-  // (une enseigne se répète d'un relevé à l'autre), à défaut le plus long.
   const freq = (w) => state.transactions.reduce((n, t) => n + (kwMatch(normTxt(t.note), w) ? 1 : 0), 0);
   tokens.sort((a, b) => freq(b) - freq(a) || b.length - a.length);
+  return tokens[0];
+}
+function learnRule(note, cat) {
+  const kw = merchantKeyword(note);
+  if (!kw) return null;
   state.rules = state.rules || {};
-  state.rules[tokens[0]] = cat;
-  return tokens[0];   // le marchand retenu
+  state.rules[kw] = cat;
+  return kw;   // le marchand retenu
+}
+// Retient l'icône choisie pour un marchand (Steam -> manette) et la retire si on repasse en Auto.
+function learnIconRule(note, slug) {
+  const kw = merchantKeyword(note);
+  if (!kw) return null;
+  state.iconRules = state.iconRules || {};
+  if (slug) state.iconRules[kw] = slug;
+  else delete state.iconRules[kw];
+  return kw;
+}
+// Icône apprise pour ce libellé, s'il correspond à un marchand connu.
+function iconFromRules(note) {
+  const n = normTxt(note);
+  if (!n) return null;
+  const rules = (state && state.iconRules) || {};
+  for (const kw in rules) { if (kw && kwMatch(n, kw)) return rules[kw]; }
+  return null;
 }
 // Corrige d'un coup toutes les opérations déjà présentes qui correspondent au même marchand.
 function applyRuleToExisting(keyword, cat, type, exceptId) {
@@ -740,7 +763,12 @@ const ICON_CHOICES = ['shield', 'repeat', 'moneywings', 'bank', 'house', 'car', 
 // Icônes 3D (Fluent, embarquées localement). L'icône d'une opération = icône perso sinon catégorie.
 function iconSrc(slug) { return 'icons/i3d/' + slug + '.png'; }
 function iconImg(slug) { return '<img class="ic3d" src="' + iconSrc(slug) + '" alt="" loading="lazy">'; }
-function txIconSlug(t) { return (t && t.icon) || (t && t.category) || 'autres'; }
+function txIconSlug(t) {
+  if (t && t.icon) return t.icon;                 // icône choisie explicitement sur CETTE opération
+  const learned = t && iconFromRules(t.note);     // icône apprise pour ce marchand
+  if (learned) return learned;
+  return (t && t.category) || 'autres';           // sinon icône de la catégorie
+}
 
 // Marchands distincts tirés des dépenses (pour pré-remplir une récurrence ou repérer un abo).
 function merchantsFromTx() {
@@ -1653,6 +1681,7 @@ function renderSheet() {
   sheet.querySelectorAll('[data-icon]').forEach((n) =>
     n.addEventListener('click', () => {
       draft.icon = n.getAttribute('data-icon') || '';
+      draft._iconManual = true;
       document.querySelectorAll('#icon-grid [data-icon]').forEach((x) =>
         x.classList.toggle('sel', (x.getAttribute('data-icon') || '') === draft.icon));
     }));
@@ -1695,11 +1724,23 @@ async function saveTx() {
     const kw = learnRule(tx.note, tx.category);
     propagated = applyRuleToExisting(kw, tx.category, tx.type, tx.id);
   }
+  // Apprentissage de l'icône : si le marchand est identifiable, la règle gouverne TOUTES ses
+  // opérations (passées et futures). Sinon l'icône reste posée sur cette seule opération.
+  let iconApplied = 0;
+  if (tx.note && draft && draft._iconManual) {
+    const kw = learnIconRule(tx.note, draft.icon);
+    if (kw) {
+      delete tx.icon; // la règle marchand pilote l'affichage, pas une icône figée sur la ligne
+      iconApplied = state.transactions.reduce((n, t) =>
+        n + (t.type === 'expense' && kwMatch(normTxt(t.note), kw) ? 1 : 0), 0);
+    }
+  }
   await save();
   closeSheet();
   render();
   const base = editingId ? 'Modifié' : 'Ajouté ✓';
-  toast(propagated ? `${base} · ${propagated} similaire(s) corrigée(s)` : base);
+  if (iconApplied > 1) toast(`Icône appliquée à ${iconApplied} opérations de ce marchand ✓`);
+  else toast(propagated ? `${base} · ${propagated} similaire(s) corrigée(s)` : base);
 }
 async function deleteTx() {
   state.transactions = state.transactions.filter((t) => t.id !== editingId);
