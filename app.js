@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -624,14 +624,53 @@ function effectiveBudget(catId, mk) {
   const leftover = round2(base - prevSpent);
   return round2(Math.max(0, base + leftover));
 }
-// Récurrences du mois pas encore enregistrées comme opération réelle.
-// "Déjà passée" = une opération du mois a même type, même catégorie et même montant (à l'euro près).
+// Jours de la semaine (0 = dimanche, comme Date.getDay()).
+const WEEKDAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+
+// Dates ISO où une récurrence tombe dans le mois mk ('YYYY-MM').
+// Mensuel : une seule date (le jour du mois, plafonné au dernier jour). Hebdo : chaque
+// occurrence du jour de la semaine choisi.
+function recurringOccurrences(r, mk) {
+  const [y, m] = mk.split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  if ((r.freq || 'mensuel') === 'hebdomadaire') {
+    const wd = Number.isInteger(r.weekday) ? r.weekday : 0;
+    const out = [];
+    for (let d = 1; d <= lastDay; d++) {
+      if (new Date(y, m - 1, d).getDay() === wd) out.push(`${mk}-${pad2(d)}`);
+    }
+    return out;
+  }
+  const day = Math.min(r.day || 1, lastDay);
+  return [`${mk}-${pad2(day)}`];
+}
+
+// Occurrences de récurrences du mois pas encore enregistrées comme opération réelle.
+// Renvoie une entrée par occurrence à provisionner (avec sa date). Chaque entrée porte
+// r.occDate (ISO) et r.day (jour du mois) pour l'affichage et l'enregistrement.
+// - Mensuel : "déjà passée" = une opération du mois a même type/catégorie/montant (à l'euro près).
+// - Hebdo : chaque occurrence du mois non couverte par une opération proche (±3 jours).
 function pendingRecurring(mk) {
   const list = state.recurring || [];
   if (!list.length) return [];
   const cur = txOfMonth(mk);
-  return list.filter((r) =>
-    !cur.some((t) => t.type === r.type && t.category === r.category && Math.abs(t.amount - r.amount) < 1));
+  const out = [];
+  for (const r of list) {
+    if ((r.freq || 'mensuel') === 'hebdomadaire') {
+      for (const iso of recurringOccurrences(r, mk)) {
+        const covered = cur.some((t) => t.type === r.type && t.category === r.category
+          && Math.abs(t.amount - r.amount) < 1 && Math.abs(daysBetween(t.date, iso)) <= 3);
+        if (!covered) out.push(Object.assign({}, r, { occDate: iso, day: parseInt(iso.slice(8, 10), 10) }));
+      }
+    } else {
+      const covered = cur.some((t) => t.type === r.type && t.category === r.category && Math.abs(t.amount - r.amount) < 1);
+      if (!covered) {
+        const iso = recurringOccurrences(r, mk)[0];
+        out.push(Object.assign({}, r, { occDate: iso, day: parseInt(iso.slice(8, 10), 10) }));
+      }
+    }
+  }
+  return out;
 }
 // Correspondance par mot entier (évite que "eau" matche dans "chateau").
 function kwMatch(n, w) {
@@ -901,13 +940,25 @@ function merchantsFromTx() {
     if (!k) continue;
     (groups[k] = groups[k] || []).push(t);
   }
+  const mode = (arr) => {   // valeur la plus fréquente
+    const c = {}; arr.forEach((v) => { c[v] = (c[v] || 0) + 1; });
+    return Object.entries(c).sort((a, b) => b[1] - a[1])[0][0];
+  };
   return Object.entries(groups).map(([k, txs]) => {
-    txs.sort((a, b) => (a.date < b.date ? 1 : -1));
+    txs.sort((a, b) => (a.date < b.date ? 1 : -1));   // plus récent d'abord
     const montants = txs.map((t) => t.amount);
     const catCount = {};
     txs.forEach((t) => { catCount[t.category] = (catCount[t.category] || 0) + 1; });
     const categorie = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0][0];
-    return { cle: k, label: txs[0].note.trim(), montant: round2(median(montants)), categorie, count: txs.length };
+    // Cadence : médiane des écarts entre occurrences (dates croissantes) -> hebdo ou mensuel.
+    const asc = txs.slice().reverse();
+    const gaps = [];
+    for (let i = 1; i < asc.length; i++) gaps.push(daysBetween(asc[i - 1].date, asc[i].date));
+    const cls = gaps.length ? classifyFreq(median(gaps)) : null;
+    const freq = cls && cls.freq === 'hebdomadaire' ? 'hebdomadaire' : 'mensuel';
+    const day = parseInt(mode(txs.map((t) => t.date.slice(8, 10))), 10) || parseInt(txs[0].date.slice(8, 10), 10);
+    const weekday = parseInt(mode(txs.map((t) => String(new Date(t.date + 'T00:00:00').getDay()))), 10);
+    return { cle: k, label: txs[0].note.trim(), montant: round2(median(montants)), categorie, count: txs.length, freq, day, weekday };
   }).sort((a, b) => b.count - a.count);
 }
 
@@ -1039,10 +1090,12 @@ function viewDashboard() {
         const c = catById(r.category);
         const cls = r.type === 'expense' ? 'exp' : 'inc';
         const sign = r.type === 'expense' ? '-' : '+';
-        return `<div class="tx-item" data-recpay="${r.id}" style="margin-bottom:6px">
+        const jour = new Date(r.occDate + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+        const passe = r.occDate <= todayISO();
+        return `<div class="tx-item" data-recpay="${r.id}" data-recdate="${r.occDate}" style="margin-bottom:6px">
           <div class="tx-ico">${iconImg(c.id)}</div>
           <div class="tx-main"><div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
-          <div class="tx-note">prévu le ${r.day} · touche pour enregistrer</div></div>
+          <div class="tx-note">${passe ? 'à enregistrer' : 'prévu'} · ${jour} · touche pour enregistrer</div></div>
           <div class="tx-amt ${cls}">${sign}${euro(r.amount)}</div>
         </div>`;
       }).join('')}
@@ -1647,15 +1700,19 @@ function viewSettings() {
 function recurringListHtml() {
   const list = state.recurring || [];
   if (!list.length) return '<div class="muted" style="font-size:13px">Aucune récurrence définie.</div>';
-  return list.slice().sort((a, b) => a.day - b.day).map((r) => {
+  const rank = (r) => (r.freq === 'hebdomadaire' ? (r.weekday || 0) : (r.day || 0) + 100);
+  return list.slice().sort((a, b) => rank(a) - rank(b)).map((r) => {
     const c = catById(r.category);
     const cls = r.type === 'expense' ? 'exp' : 'inc';
     const sign = r.type === 'expense' ? '-' : '+';
+    const quand = r.freq === 'hebdomadaire'
+      ? `tous les ${WEEKDAYS[Number.isInteger(r.weekday) ? r.weekday : 0]}s`
+      : `le ${r.day} de chaque mois`;
     return `<div class="tx-item" data-recur="${r.id}" style="margin-bottom:8px">
       <div class="tx-ico">${iconImg(c.id)}</div>
       <div class="tx-main">
         <div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
-        <div class="tx-note">le ${r.day} de chaque mois · ${c.name}</div>
+        <div class="tx-note">${quand} · ${c.name}</div>
       </div>
       <div class="tx-amt ${cls}">${sign}${euro(r.amount)}</div>
     </div>`;
@@ -1682,7 +1739,7 @@ function bindView() {
   if (currentTab === 'dashboard') {
     el('unlock-lic')?.addEventListener('click', openLicenceSheet);
     document.querySelectorAll('[data-recpay]').forEach((n) =>
-      n.addEventListener('click', () => recordRecurring(n.getAttribute('data-recpay'))));
+      n.addEventListener('click', () => recordRecurring(n.getAttribute('data-recpay'), n.getAttribute('data-recdate'))));
   }
   if (currentTab === 'tx') bindTxFilters();
   if (currentTab === 'budgets') {
@@ -1999,7 +2056,7 @@ function openBudgetSheet() {
 function openRecurringSheet(id) {
   editRecurId = id || null;
   const ex = id ? (state.recurring || []).find((r) => r.id === id) : null;
-  rdraft = ex ? Object.assign({}, ex) : { type: 'expense', amount: 0, category: 'logement', note: '', day: 1 };
+  rdraft = ex ? Object.assign({ freq: 'mensuel', weekday: 1 }, ex) : { type: 'expense', amount: 0, category: 'logement', note: '', day: 1, freq: 'mensuel', weekday: 1 };
   renderRecurringSheet();
   el('sheet-backdrop').classList.remove('hidden');
   el('sheet').classList.remove('hidden');
@@ -2008,6 +2065,7 @@ function syncRDraft() {
   const a = el('r-amount'); if (a) rdraft.amount = a.value;
   const n = el('r-note'); if (n) rdraft.note = n.value;
   const d = el('r-day'); if (d) rdraft.day = d.value;
+  const w = el('r-week'); if (w) rdraft.weekday = parseInt(w.value, 10);
 }
 function renderRecurringSheet() {
   const cats = rdraft.type === 'income' ? INCOME_CATS : EXPENSE_CATS;
@@ -2039,17 +2097,33 @@ function renderRecurringSheet() {
     </div>
     <div class="field">
       <label>Libellé</label>
-      <input id="r-note" type="text" placeholder="ex : Loyer, Netflix, Salaire" value="${escapeHtml(rdraft.note || '')}">
+      <input id="r-note" type="text" placeholder="ex : Loyer, Netflix, Bitstack" value="${escapeHtml(rdraft.note || '')}">
     </div>
+    <div class="field">
+      <label>Fréquence</label>
+      <div class="seg">
+        <button id="rfreq-mois" class="${rdraft.freq !== 'hebdomadaire' ? 'on-exp' : ''}">Mensuel</button>
+        <button id="rfreq-sem" class="${rdraft.freq === 'hebdomadaire' ? 'on-exp' : ''}">Hebdomadaire</button>
+      </div>
+    </div>
+    ${rdraft.freq === 'hebdomadaire' ? `
+    <div class="field">
+      <label>Jour de la semaine</label>
+      <select id="r-week" class="r-select">
+        ${WEEKDAYS.map((w, i) => `<option value="${i}" ${i === (Number.isInteger(rdraft.weekday) ? rdraft.weekday : 1) ? 'selected' : ''}>${w.charAt(0).toUpperCase() + w.slice(1)}</option>`).join('')}
+      </select>
+    </div>` : `
     <div class="field">
       <label>Jour du mois (1 à 28)</label>
       <input id="r-day" type="number" inputmode="numeric" min="1" max="28" value="${rdraft.day || 1}">
-    </div>
+    </div>`}
     <button class="btn" id="r-save">${editRecurId ? 'Enregistrer' : 'Ajouter'}</button>
     ${editRecurId ? '<button class="btn btn-danger" id="r-delete" style="margin-top:10px">Supprimer</button>' : ''}
   `;
   el('rseg-exp').addEventListener('click', () => { rdraft.type = 'expense'; syncRDraft(); renderRecurringSheet(); });
   el('rseg-inc').addEventListener('click', () => { rdraft.type = 'income'; syncRDraft(); renderRecurringSheet(); });
+  el('rfreq-mois').addEventListener('click', () => { syncRDraft(); rdraft.freq = 'mensuel'; renderRecurringSheet(); });
+  el('rfreq-sem').addEventListener('click', () => { syncRDraft(); rdraft.freq = 'hebdomadaire'; renderRecurringSheet(); });
   el('r-pick')?.addEventListener('change', (e) => {
     const m = merchantsFromTx().find((x) => x.cle === e.target.value);
     if (!m) return;
@@ -2057,6 +2131,10 @@ function renderRecurringSheet() {
     rdraft.amount = m.montant;
     rdraft.note = cleanMerchant(m.label);
     rdraft.category = m.categorie;
+    // récupère la cadence et la date depuis l'historique du marchand
+    rdraft.freq = m.freq;
+    rdraft.day = m.day;
+    if (Number.isInteger(m.weekday)) rdraft.weekday = m.weekday;
     renderRecurringSheet();
   });
   sheet.querySelectorAll('[data-rcat]').forEach((n) =>
@@ -2072,16 +2150,21 @@ async function saveRecurring() {
   const raw = el('r-amount').value.replace(/\s/g, '').replace(',', '.');
   const amount = round2(parseFloat(raw));
   if (isNaN(amount) || amount <= 0) { toast('Entre un montant valide'); return; }
-  let day = parseInt(el('r-day').value, 10);
+  const hebdo = rdraft.freq === 'hebdomadaire';
+  let day = parseInt(el('r-day')?.value, 10);
   if (isNaN(day) || day < 1) day = 1;
   if (day > 28) day = 28;
+  let weekday = parseInt(el('r-week')?.value, 10);
+  if (isNaN(weekday) || weekday < 0 || weekday > 6) weekday = Number.isInteger(rdraft.weekday) ? rdraft.weekday : 1;
   const rec = {
     id: editRecurId || crypto.randomUUID(),
     type: rdraft.type,
     amount,
     category: rdraft.category,
     note: el('r-note').value.trim(),
+    freq: hebdo ? 'hebdomadaire' : 'mensuel',
     day,
+    weekday,
   };
   state.recurring = state.recurring || [];
   if (editRecurId) {
@@ -2103,14 +2186,18 @@ async function deleteRecurring() {
   toast('Récurrence supprimée');
 }
 // Enregistre une récurrence du mois comme opération réelle (feuille pré-remplie à valider).
-function recordRecurring(id) {
+function recordRecurring(id, occDate) {
   const r = (state.recurring || []).find((x) => x.id === id);
   if (!r) return;
   editingId = null;
-  const d = new Date();
-  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-  const day = Math.min(r.day, lastDay);
-  let date = `${ym(d)}-${pad2(day)}`;
+  let date;
+  if (occDate) {
+    date = occDate;   // occurrence précise (hebdo ou mensuelle)
+  } else {
+    const d = new Date();
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    date = `${ym(d)}-${pad2(Math.min(r.day || 1, lastDay))}`;
+  }
   if (date > todayISO()) date = todayISO();   // pas de dépense future
   draft = { type: r.type, amount: r.amount, category: r.category, date, note: r.note || '' };
   renderSheet();
