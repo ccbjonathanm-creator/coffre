@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -1617,10 +1617,39 @@ function openSheet(id) {
   el('sheet').classList.remove('hidden');
 }
 function closeSheet() {
+  const sheet = el('sheet');
+  sheet.style.transition = ''; sheet.style.transform = ''; // réinitialise après un glissement
   el('sheet-backdrop').classList.add('hidden');
-  el('sheet').classList.add('hidden');
+  sheet.classList.add('hidden');
   editingId = null; draft = null;
   editRecurId = null; rdraft = null;
+}
+// Glisser la feuille vers le bas pour la fermer (comme une vraie feuille modale mobile).
+// Ne s'active que si le contenu est déjà en haut, sinon on laisse défiler normalement.
+function setupSheetSwipe() {
+  const sheet = el('sheet');
+  let startY = 0, dy = 0, dragging = false;
+  sheet.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || sheet.scrollTop > 0) { dragging = false; return; }
+    startY = e.touches[0].clientY; dy = 0; dragging = true;
+    sheet.style.transition = 'none';
+  }, { passive: true });
+  sheet.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    dy = e.touches[0].clientY - startY;
+    if (dy > 0) { sheet.style.transform = `translateY(${dy}px)`; e.preventDefault(); }
+  }, { passive: false });
+  sheet.addEventListener('touchend', () => {
+    if (!dragging) return;
+    dragging = false;
+    sheet.style.transition = 'transform .2s ease';
+    if (dy > 90) {                    // glissé assez loin -> on ferme
+      sheet.style.transform = 'translateY(100%)';
+      setTimeout(closeSheet, 190);
+    } else {                          // pas assez -> retour en place
+      sheet.style.transform = '';
+    }
+  });
 }
 function renderSheet() {
   const cats = draft.type === 'income' ? INCOME_CATS : EXPENSE_CATS;
@@ -2480,6 +2509,7 @@ function init() {
 
   // Fermeture de la feuille
   el('sheet-backdrop').addEventListener('click', closeSheet);
+  setupSheetSwipe();
 
   // Auto-lock : réinitialisé à chaque interaction
   ['click', 'touchstart', 'keydown'].forEach((ev) =>
