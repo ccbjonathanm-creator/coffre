@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -89,6 +89,8 @@ let currentTab = 'dashboard';
 let analyticsMonth = null;   // mois affiché dans l'onglet Budgets & analyse (clé 'YYYY-MM')
 let lockTimer = null;
 let deferredInstall = null;
+let swReg = null;          // registration du service worker (pour la mise à jour manuelle)
+let updateReady = false;   // une nouvelle version est téléchargée et prête à s'installer
 
 // Saisie du code
 let pinBuffer = '';
@@ -730,6 +732,11 @@ function freqParAn(f) {
   return m[f] || 12;
 }
 
+// Palette d'icônes assignables à une opération (purement visuel, ne change PAS la catégorie).
+const ICON_CHOICES = ['🛡️', '🔁', '💸', '🏦', '🏠', '🚗', '⛽', '🧾', '💡', '💧', '📱', '📶',
+  '📺', '🎵', '🎮', '🛒', '🍔', '☕', '💊', '🏋️', '✈️', '🎁', '💼', '🐖', '🚬', '👕', '🍺',
+  '🐾', '💳', '🎰', '⚕️', '🩺', '🏥', '🎓', '🐟', '🔧', '📦'];
+
 // Marchands distincts tirés des dépenses (pour pré-remplir une récurrence ou repérer un abo).
 function merchantsFromTx() {
   const groups = {};
@@ -908,13 +915,17 @@ function viewDashboard() {
   `;
 }
 
+// Icône affichée d'une opération : icône perso choisie à la main, sinon celle de la catégorie.
+function txEmoji(t) {
+  return (t && t.icon) || catById(t.category).emoji;
+}
 function txRow(t) {
   const c = catById(t.category);
   const cls = t.type === 'expense' ? 'exp' : 'inc';
   const sign = t.type === 'expense' ? '-' : '+';
   return `
     <div class="tx-item" data-edit="${t.id}">
-      <div class="tx-ico">${c.emoji}</div>
+      <div class="tx-ico">${txEmoji(t)}</div>
       <div class="tx-main">
         <div class="tx-cat">${escapeHtml(c.name)}</div>
         <div class="tx-note">${escapeHtml(t.note || new Date(t.date).toLocaleDateString('fr-FR'))}</div>
@@ -1435,6 +1446,19 @@ function viewSettings() {
       <button class="btn btn-danger" id="wipe" style="margin-top:10px">🗑️ Tout effacer (code compris)</button>
     </div>
 
+    <div class="section-title">Mise à jour</div>
+    <div class="card">
+      <div class="set-row">
+        <div>
+          <div class="set-label">Version installée</div>
+          <div class="set-desc">${updateReady ? '<b style="color:var(--accent)">Nouvelle version disponible !</b>' : 'Ta version est à jour.'}</div>
+        </div>
+        <span class="ver-pill">Coffre ${APP_VERSION}</span>
+      </div>
+      <button class="btn ${updateReady ? '' : 'btn-2'}" id="do-update" style="margin-top:12px">${updateReady ? '⬇️ Installer la nouvelle version' : '🔄 Mettre à jour'}</button>
+      <div class="set-desc" style="margin-top:10px">🔒 Une mise à jour <b>n'efface jamais</b> tes opérations ni tes réglages. Elle ne remplace que l'application.</div>
+    </div>
+
     <p class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre ${APP_VERSION} • 100% hors-ligne • chiffré AES-256</p>
   `;
 }
@@ -1547,6 +1571,7 @@ function bindSettings() {
   el('recat').addEventListener('click', recategorizeAll);
   el('clear-tx').addEventListener('click', clearTransactions);
   el('wipe').addEventListener('click', wipeAll);
+  el('do-update')?.addEventListener('click', () => (updateReady ? applyUpdate() : checkForUpdate()));
 }
 
 // ---------------- Feuille : ajout / édition d'opération ----------------
@@ -1591,6 +1616,13 @@ function renderSheet() {
       <input id="f-note" type="text" placeholder="ex : Courses Lidl" value="${escapeHtml(draft.note || '')}">
     </div>
     <div class="field">
+      <label>Icône (facultatif, ne change pas la catégorie)</label>
+      <div class="icon-grid" id="icon-grid">
+        <button class="icon-chip auto ${!draft.icon ? 'sel' : ''}" data-icon="">Auto</button>
+        ${ICON_CHOICES.map((e) => `<button class="icon-chip ${draft.icon === e ? 'sel' : ''}" data-icon="${e}">${e}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
       <label>Date</label>
       <input id="f-date" type="date" value="${draft.date}" max="${todayISO()}">
     </div>
@@ -1616,6 +1648,12 @@ function renderSheet() {
       if (g && g !== draft.category) { draft.category = g; highlightCat(g); }
     }
   });
+  sheet.querySelectorAll('[data-icon]').forEach((n) =>
+    n.addEventListener('click', () => {
+      draft.icon = n.getAttribute('data-icon') || '';
+      document.querySelectorAll('#icon-grid [data-icon]').forEach((x) =>
+        x.classList.toggle('sel', (x.getAttribute('data-icon') || '') === draft.icon));
+    }));
   el('f-save').addEventListener('click', saveTx);
   el('f-abo')?.addEventListener('click', () => openAboFlagSheet(editingId));
   el('f-delete')?.addEventListener('click', deleteTx);
@@ -1641,6 +1679,7 @@ async function saveTx() {
     note: el('f-note').value.trim(),
     date: el('f-date').value || todayISO(),
   };
+  if (draft.icon) tx.icon = draft.icon; // icône perso (facultative)
   if (editingId) {
     const i = state.transactions.findIndex((t) => t.id === editingId);
     state.transactions[i] = tx;
@@ -2304,13 +2343,50 @@ async function doInstall() {
   render();
 }
 
+// ---------------- Mise à jour de l'application ----------------
+// Important : mettre à jour ne touche JAMAIS aux données (elles sont en localStorage chiffré,
+// séparé du cache du service worker). On ne fait que remplacer le code de l'appli.
+function markUpdateReady() {
+  updateReady = true;
+  if (state && currentTab === 'settings') render(); // fait apparaître "nouvelle version dispo"
+}
+async function checkForUpdate() {
+  if (!swReg) { toast('Mise à jour indisponible ici'); return; }
+  // Un worker déjà en attente ? On l'active tout de suite.
+  if (swReg.waiting) { applyUpdate(); return; }
+  toast('Recherche…');
+  try { await swReg.update(); } catch (e) { /* hors-ligne */ }
+  // Laisse le temps au worker de passer en "installed" puis vérifie.
+  setTimeout(() => {
+    if (swReg.waiting || updateReady) applyUpdate();
+    else toast('Tu es déjà à jour ✓');
+  }, 1200);
+}
+function applyUpdate() {
+  if (swReg && swReg.waiting) {
+    swReg.waiting.postMessage({ type: 'SKIP_WAITING' }); // controllerchange -> reload auto
+    toast('Mise à jour en cours…');
+  } else {
+    location.reload();
+  }
+}
+
 // ---------------- Démarrage ----------------
 function init() {
-  // Service worker (hors-ligne) + mise à jour automatique.
+  // Service worker (hors-ligne) + détection des mises à jour.
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then((reg) => {
+      swReg = reg;
       reg.update();
-      // vérifie une nouvelle version quand l'appli revient au premier plan
+      if (reg.waiting && navigator.serviceWorker.controller) markUpdateReady();
+      // une nouvelle version arrive : on la repère quand elle est prête (installée)
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) markUpdateReady();
+        });
+      });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') reg.update();
       });

@@ -269,6 +269,17 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .linkbtn { color: var(--accent); font-size: 12px; font-weight: 600; padding: 4px 6px; }
 .resil-area { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--card-2);
   color: var(--text); padding: 12px; font-size: 13px; line-height: 1.5; resize: vertical; font-family: inherit; }
+.ver-pill { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent); padding: 5px 12px; border-radius: 20px; }
+
+/* ---------------- Grille de choix d'icône ---------------- */
+.icon-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.icon-chip { width: 42px; height: 42px; border-radius: 12px; font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card-2); border: 1px solid var(--line); transition: transform .1s, border-color .12s; }
+.icon-chip.auto { width: auto; padding: 0 14px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.icon-chip.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.icon-chip:active { transform: scale(.9); }
 
 /* ---------------- Feuille modale ---------------- */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; animation: fade .2s; }
