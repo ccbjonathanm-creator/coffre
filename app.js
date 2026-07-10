@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v27';
+const APP_VERSION = 'v28';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -683,12 +683,18 @@ function guessCategory(note, type) {
   const n = normTxt(note);
   if (!n) return null;
   const pool = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
-  // 1) règles apprises des corrections manuelles (prioritaires)
+  // 1) règles apprises des corrections manuelles (prioritaires).
+  // En cas de plusieurs règles qui matchent, la PLUS SPÉCIFIQUE gagne (le plus de mots) :
+  // "intermarche station" (Transport) l'emporte sur "intermarche" (Alimentation).
   const rules = (state && state.rules) || {};
+  let best = null, bestLen = 0;
   for (const kw in rules) {
     const cat = rules[kw];
-    if (kw && kwMatch(n, kw) && pool.some((c) => c.id === cat)) return cat;
+    if (!kw || !pool.some((c) => c.id === cat) || !ruleMatch(n, kw)) continue;
+    const len = kw.split(' ').length;
+    if (len > bestLen) { best = cat; bestLen = len; }
   }
+  if (best) return best;
   // 2) dictionnaire intégré
   for (const [cat, words] of Object.entries(KEYWORDS)) {
     if (!pool.some((c) => c.id === cat)) continue;
@@ -701,21 +707,47 @@ const RULE_STOPWORDS = new Set(['paiement', 'carte', 'cb', 'prlv', 'sepa', 'vir'
   'retrait', 'france', 'avec', 'pour', 'date', 'ref', 'sarl', 'sas', 'eurl', 'facture', 'mensuel',
   'client', 'clients', 'particuliers', 'recu', 'inst', 'ste', 'du', 'le', 'la', 'les', 'des', 'un', 'une', 'par',
   'www', 'com', 'fra', 'sa', 'to', 'the', 'and']);
-// Extrait le "marchand" d'un libellé : le token le plus significatif (celui qui revient
-// le plus souvent dans l'historique, une enseigne se répète ; à défaut le plus long).
-function merchantKeyword(note) {
-  const tokens = normTxt(note).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !RULE_STOPWORDS.has(w));
-  if (!tokens.length) return null;
+// Tokens significatifs d'un libellé, ordonnés : l'enseigne d'abord (le mot qui revient le
+// plus dans l'historique), puis les mots les plus longs. Sert de base aux règles marchand.
+function sigTokens(note) {
+  const toks = normTxt(note).split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !RULE_STOPWORDS.has(w) && !/^\d+$/.test(w));
+  if (!toks.length) return [];
+  const uniq = [...new Set(toks)];
   const freq = (w) => state.transactions.reduce((n, t) => n + (kwMatch(normTxt(t.note), w) ? 1 : 0), 0);
-  tokens.sort((a, b) => freq(b) - freq(a) || b.length - a.length);
-  return tokens[0];
+  uniq.sort((a, b) => freq(b) - freq(a) || b.length - a.length);
+  return uniq;
 }
-function learnRule(note, cat) {
-  const kw = merchantKeyword(note);
-  if (!kw) return null;
+// Le "marchand" d'un libellé = son token le plus significatif (pour les règles d'icône).
+function merchantKeyword(note) {
+  return sigTokens(note)[0] || null;
+}
+// Une règle marchand peut tenir en PLUSIEURS mots (tous requis). "intermarche station" ne
+// matche que les libellés contenant les deux, pas les simples "Intermarché" des courses.
+function ruleMatch(n, key) {
+  return String(key).split(' ').every((w) => w && kwMatch(n, w));
+}
+// Signature DISCRIMINANTE apprise d'une correction : on part de l'enseigne, et on ajoute
+// juste ce qu'il faut de mots pour ne PLUS capturer d'opérations d'une autre catégorie.
+// Ex : "Intermarché station service" -> Transport donne "intermarche station" (pas "intermarche"),
+// pour ne pas emporter les courses Intermarché rangées en Alimentation.
+function ruleSignature(note, cat, type) {
+  const toks = sigTokens(note);
+  if (!toks.length) return null;
+  const others = state.transactions
+    .filter((t) => t.type === type && t.category !== cat)
+    .map((t) => normTxt(t.note));
+  const capturesOther = (sig) => others.some((n) => sig.every((w) => kwMatch(n, w)));
+  const chosen = [toks[0]];
+  for (let i = 1; i < toks.length && capturesOther(chosen); i++) chosen.push(toks[i]);
+  return chosen.join(' ');
+}
+function learnRule(note, cat, type) {
+  const key = ruleSignature(note, cat, type);
+  if (!key) return null;
   state.rules = state.rules || {};
-  state.rules[kw] = cat;
-  return kw;   // le marchand retenu
+  state.rules[key] = cat;
+  return key;   // la signature retenue (un ou plusieurs mots)
 }
 // Retient l'icône choisie pour un marchand (Steam -> manette) et la retire si on repasse en Auto.
 function learnIconRule(note, slug) {
@@ -740,7 +772,12 @@ function applyRuleToExisting(keyword, cat, type, exceptId) {
   let n = 0;
   for (const t of state.transactions) {
     if (t.id === exceptId || t.type !== type || t.category === cat) continue;
-    if (kwMatch(normTxt(t.note), keyword)) { t.category = cat; n++; }
+    // On ne bascule que si cette règle est bien la plus spécifique pour ce libellé
+    // (guessCategory arbitre entre règles concurrentes), pour ne pas emporter un
+    // marchand qu'une règle plus fine range ailleurs.
+    if (ruleMatch(normTxt(t.note), keyword) && guessCategory(t.note, t.type) === cat) {
+      t.category = cat; n++;
+    }
   }
   return n;
 }
@@ -2042,7 +2079,7 @@ async function saveTx() {
   // l'appli retient le marchand (futurs imports) ET corrige toutes les opérations identiques déjà là.
   let propagated = 0;
   if (tx.note && draft && draft._catManual && tx.category !== 'autres' && tx.category !== 'autres_in') {
-    const kw = learnRule(tx.note, tx.category);
+    const kw = learnRule(tx.note, tx.category, tx.type);
     propagated = applyRuleToExisting(kw, tx.category, tx.type, tx.id);
   }
   // Apprentissage de l'icône : si le marchand est identifiable, la règle gouverne TOUTES ses
