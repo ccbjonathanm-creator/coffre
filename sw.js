@@ -1,5 +1,5 @@
 /* Coffre — service worker : met l'app en cache pour un fonctionnement hors-ligne. */
-const CACHE = 'coffre-v19';
+const CACHE = 'coffre-v20';
 const ASSETS = [
   './',
   './index.html',
@@ -39,10 +39,10 @@ self.addEventListener('fetch', (e) => {
     || (/\.(html|js|css|webmanifest)$/.test(url.pathname) && !url.pathname.includes('/vendor/'));
 
   if (isCore) {
-    // Réseau d'abord : les mises à jour de l'appli arrivent dès qu'on est connecté,
-    // le cache sert uniquement de secours hors-ligne.
+    // Réseau d'abord, en CONTOURNANT le cache HTTP du navigateur (no-store) : sinon il pouvait
+    // resservir un ancien app.js et bloquer la mise à jour. Le cache SW sert de secours hors-ligne.
     e.respondWith(
-      fetch(e.request).then((res) => {
+      fetch(e.request, { cache: 'no-store' }).then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
         return res;

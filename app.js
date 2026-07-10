@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -1602,7 +1602,7 @@ function bindSettings() {
   el('recat').addEventListener('click', recategorizeAll);
   el('clear-tx').addEventListener('click', clearTransactions);
   el('wipe').addEventListener('click', wipeAll);
-  el('do-update')?.addEventListener('click', () => (updateReady ? applyUpdate() : checkForUpdate()));
+  el('do-update')?.addEventListener('click', doAppUpdate);
 }
 
 // ---------------- Feuille : ajout / édition d'opération ----------------
@@ -2396,25 +2396,26 @@ function markUpdateReady() {
   updateReady = true;
   if (state && currentTab === 'settings') render(); // fait apparaître "nouvelle version dispo"
 }
-async function checkForUpdate() {
-  if (!swReg) { toast('Mise à jour indisponible ici'); return; }
-  // Un worker déjà en attente ? On l'active tout de suite.
-  if (swReg.waiting) { applyUpdate(); return; }
-  toast('Recherche…');
-  try { await swReg.update(); } catch (e) { /* hors-ligne */ }
-  // Laisse le temps au worker de passer en "installed" puis vérifie.
-  setTimeout(() => {
-    if (swReg.waiting || updateReady) applyUpdate();
-    else toast('Tu es déjà à jour ✓');
-  }, 1200);
-}
-function applyUpdate() {
-  if (swReg && swReg.waiting) {
-    swReg.waiting.postMessage({ type: 'SKIP_WAITING' }); // controllerchange -> reload auto
-    toast('Mise à jour en cours…');
-  } else {
-    location.reload();
-  }
+// Mise à jour à toute épreuve : active le nouveau worker, VIDE le cache du code (jamais les
+// données, qui sont en localStorage), puis recharge du réseau. Impossible de rester bloqué.
+let updating = false;
+async function doAppUpdate() {
+  if (updating) return;
+  updating = true;
+  toast('Mise à jour…');
+  try {
+    if (swReg) {
+      await swReg.update();
+      if (swReg.waiting) swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
+  } catch (e) { /* hors-ligne : on tente quand même le rechargement */ }
+  // On efface UNIQUEMENT le Cache Storage (coquille de l'appli). localStorage (tes opérations
+  // chiffrées) n'est PAS touché.
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  } catch (e) { /* ignore */ }
+  setTimeout(() => location.reload(), 500);
 }
 
 // ---------------- Démarrage ----------------
