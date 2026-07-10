@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v15';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -641,10 +641,27 @@ function classifyFreq(gap) {
   if (gap >= 335 && gap <= 395) return { freq: 'annuel', parAn: 1 };
   return null; // cadence irrégulière -> pas un abonnement
 }
+// Tolérance de montant : 12% relatif, plancher 1€ (absorbe une petite hausse de tarif,
+// mais sépare deux abonnements distincts d'un même marchand, ex Bouygues 14,99 et 44,39).
+function amountTol(ref) { return Math.max(Math.abs(ref) * 0.12, 1); }
+// Regroupe les opérations d'un marchand par PALIER de montant. Un abonnement a un montant
+// fixe : ce clustering isole chaque prélèvement récurrent et écarte les montants exceptionnels.
+function clusterByAmount(txs) {
+  const sorted = txs.slice().sort((a, b) => a.amount - b.amount);
+  const clusters = [];
+  for (const t of sorted) {
+    const last = clusters[clusters.length - 1];
+    if (last) {
+      const ref = median(last.map((x) => x.amount));
+      if (Math.abs(t.amount - ref) <= amountTol(ref)) { last.push(t); continue; }
+    }
+    clusters.push([t]);
+  }
+  return clusters;
+}
 // Le détecteur. Rend la liste triée du plus cher (à l'année) au moins cher.
 function detecterAbonnements(opts = {}) {
   const minOcc = opts.minOccurrences || 3;
-  const tolMontant = opts.tolMontant != null ? opts.tolMontant : 0.15;
   const refDate = opts.refDate ? new Date(opts.refDate) : new Date();
 
   const depenses = (state.transactions || []).filter(
@@ -659,37 +676,42 @@ function detecterAbonnements(opts = {}) {
 
   const abos = [];
   for (const [key, txs] of Object.entries(groupes)) {
-    if (txs.length < minOcc) continue;
-    txs.sort((a, b) => (a.date < b.date ? -1 : 1));
+    // On sépare d'abord par palier de montant, puis on teste la régularité de chaque palier.
+    for (const cluster of clusterByAmount(txs)) {
+      if (cluster.length < minOcc) continue;
+      // Couverture : un abonnement domine les opérations de son marchand (Netflix = 3/3).
+      // Un marchand de courses (Intermarché) a des dizaines d'achats dont un petit paquet
+      // qui semble périodique par hasard : ce cluster est minoritaire, on l'écarte.
+      if (cluster.length < txs.length * 0.5) continue;
+      cluster.sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    const gaps = [];
-    for (let i = 1; i < txs.length; i++) gaps.push(daysBetween(txs[i - 1].date, txs[i].date));
-    const gapMed = median(gaps);
-    const cls = classifyFreq(gapMed);
-    if (!cls) continue;
+      const gaps = [];
+      for (let i = 1; i < cluster.length; i++) gaps.push(daysBetween(cluster[i - 1].date, cluster[i].date));
+      const gapMed = median(gaps);
+      const cls = classifyFreq(gapMed);
+      if (!cls) continue;
 
-    const montants = txs.map((t) => t.amount);
-    const montMed = median(montants);
-    if (montMed <= 0) continue;
-    const ecartMax = Math.max(...montants.map((m) => Math.abs(m - montMed))) / montMed;
-    if (ecartMax > tolMontant) continue; // montant trop variable -> facture, pas abo
+      const montants = cluster.map((t) => t.amount);
+      const montMed = median(montants);
+      if (montMed <= 0) continue;
 
-    const dernier = txs[txs.length - 1].date;
-    const actif = daysBetween(dernier, refDate) <= gapMed * 1.8;
+      const dernier = cluster[cluster.length - 1].date;
+      const actif = daysBetween(dernier, refDate) <= gapMed * 1.8;
 
-    abos.push({
-      marchand: txs[txs.length - 1].note.trim(),
-      cle: key,
-      montant: round2(montMed),
-      frequence: cls.freq,
-      coutAnnuel: round2(montMed * cls.parAn),
-      occurrences: txs.length,
-      totalPaye: round2(montants.reduce((s, m) => s + m, 0)),
-      premier: txs[0].date,
-      dernier,
-      categorie: txs[0].category,
-      actif,
-    });
+      abos.push({
+        marchand: cluster[cluster.length - 1].note.trim(),
+        cle: key + '|' + Math.round(montMed * 100), // marchand + palier de montant
+        montant: round2(montMed),
+        frequence: cls.freq,
+        coutAnnuel: round2(montMed * cls.parAn),
+        occurrences: cluster.length,
+        totalPaye: round2(montants.reduce((s, m) => s + m, 0)),
+        premier: cluster[0].date,
+        dernier,
+        categorie: cluster[0].category,
+        actif,
+      });
+    }
   }
   abos.sort((a, b) => b.coutAnnuel - a.coutAnnuel);
   return abos;
@@ -727,13 +749,18 @@ function merchantsFromTx() {
   }).sort((a, b) => b.count - a.count);
 }
 
-// Enrichit un abonnement ajouté à la main avec ses vraies occurrences (si présentes).
+// Enrichit un abonnement ajouté à la main avec ses vraies occurrences (même marchand
+// et montant proche du palier enregistré dans la clé "marchand|centimes").
 function enrichManuel(m) {
   const parAn = freqParAn(m.frequence);
   const occ = [];
-  if (m.cle) {
+  const [mk, cents] = String(m.cle || '').split('|');
+  const cible = cents ? parseInt(cents, 10) / 100 : m.montant;
+  if (mk) {
     for (const t of (state.transactions || [])) {
-      if (t.type === 'expense' && merchantKey(t.note) === m.cle) occ.push(t);
+      if (t.type !== 'expense' || merchantKey(t.note) !== mk) continue;
+      if (cible && Math.abs(t.amount - cible) > amountTol(cible)) continue;
+      occ.push(t);
     }
   }
   occ.sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -1258,8 +1285,9 @@ let aboFlagDraft = null;
 function openAboFlagSheet(txId) {
   const tx = state.transactions.find((t) => t.id === txId);
   if (!tx) return;
+  const mk = merchantKey(tx.note);
   aboFlagDraft = {
-    cle: merchantKey(tx.note),
+    cle: mk ? mk + '|' + Math.round(tx.amount * 100) : null,
     marchand: tx.note.trim() || cleanMerchant(tx.note) || 'Abonnement',
     montant: tx.amount,
     categorie: tx.category,
