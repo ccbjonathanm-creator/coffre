@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v30';
+const APP_VERSION = 'v31';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -430,10 +430,10 @@ function openLicenceSheet() {
   const sheet = el('sheet');
   sheet.innerHTML = `
     <div class="sheet-grip"></div>
-    <h2>Débloquer la version à vie</h2>
+    <h2>Débloquer la version à vie${licensed ? '' : ' — 15 €'}</h2>
     <p class="muted" style="font-size:13px;margin:-8px 0 14px">${licensed
       ? 'Ta version à vie est déjà active. Merci ! ✓'
-      : `Version d'essai : <b>${ti.daysLeft} jour(s)</b> restant(s). La clé est liée à ton e-mail : elle marche sur tous tes appareils, même après une réinstallation.`}</p>
+      : `Version d'essai : <b>${ti.daysLeft} jour(s)</b> restant(s). Déblocage à vie <b>15 €</b>, un seul paiement. La clé est liée à ton e-mail : elle marche sur tous tes appareils, même après une réinstallation.`}</p>
     ${licensed ? '' : `
     <div class="field">
       <label>E-mail d'achat</label>
