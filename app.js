@@ -483,6 +483,17 @@ async function genMakeLicence(email) {
   const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, genSignKey, enc.encode('coffre-licence:' + normEmail(email)));
   return b64(sig);
 }
+// --- Registre des ventes (e-mail -> clé + date), gardé sur ce téléphone ---
+const GEN_LEDGER = 'coffre.ledger';
+function ledgerGet() { try { return JSON.parse(localStorage.getItem(GEN_LEDGER)) || []; } catch (e) { return []; } }
+function ledgerSave(l) { localStorage.setItem(GEN_LEDGER, JSON.stringify(l)); }
+function ledgerAdd(email, key) {
+  email = normEmail(email);
+  const l = ledgerGet(); const i = l.findIndex((x) => x.email === email);
+  const e = { email, key, date: new Date().toISOString().slice(0, 10) };
+  if (i >= 0) l[i] = e; else l.push(e); ledgerSave(l);
+}
+function ledgerEsc(s) { return (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function openGeneratorSheet() {
   genSignKey = null;
   genRender(genVault() ? 'unlock' : 'setup');
@@ -532,10 +543,57 @@ function genRender(screen) {
         <p id="gg-ok" class="ok" style="color:var(--green);font-size:13px;text-align:center"></p>
       </div>
       <p id="gg-err" class="lock-error" style="text-align:center"></p>
+      <button class="btn btn-2" id="gg-ledger" style="margin-top:10px">📋 Registre des ventes (${ledgerGet().length})</button>
       <button class="btn btn-2" id="gg-lock" style="margin-top:10px">🔒 Verrouiller</button>`;
     el('gg-go').addEventListener('click', genDoGenerate);
+    el('gg-ledger').addEventListener('click', genRenderLedger);
     el('gg-lock').addEventListener('click', () => { genSignKey = null; genRender('unlock'); });
   }
+}
+function genRenderLedger() {
+  const sheet = el('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-grip"></div>
+    <h2>📋 Registre des ventes</h2>
+    <p class="muted" style="font-size:13px;margin:-8px 0 12px">Tes acheteurs, gardés sur ce téléphone. Cherche un e-mail pour vérifier un achat et recopier sa clé.</p>
+    <div class="field"><input id="ld-q" type="search" placeholder="Chercher un e-mail…" autocomplete="off"></div>
+    <div id="ld-list" style="max-height:44vh;overflow:auto"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-2" id="ld-exp" style="flex:1">⬇ Sauvegarder</button>
+      <button class="btn btn-2" id="ld-imp" style="flex:1">⬆ Restaurer</button>
+    </div>
+    <button class="btn" id="ld-back" style="margin-top:10px">← Retour</button>
+    <input id="ld-file" type="file" accept=".json,application/json" class="hidden">`;
+  const render = () => {
+    const q = (el('ld-q').value || '').trim().toLowerCase();
+    const list = ledgerGet().filter((x) => !q || x.email.includes(q)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const box = el('ld-list');
+    if (!list.length) { box.innerHTML = `<p class="muted" style="text-align:center;padding:10px">${q ? 'Aucun e-mail ne correspond.' : "Aucune vente enregistrée pour l'instant."}</p>`; return; }
+    box.innerHTML = list.map((x, i) => `<div style="display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid var(--line)">
+      <div style="flex:1;min-width:0"><div style="font-weight:700;word-break:break-all">${ledgerEsc(x.email)}</div><div class="muted" style="font-size:11px">acheté le ${x.date || '?'}</div></div>
+      <button class="btn btn-2" data-i="${i}" style="flex:none;width:auto;padding:8px 12px">Copier</button></div>`).join('');
+    box.querySelectorAll('button[data-i]').forEach((b) => b.addEventListener('click', () => {
+      const x = list[+b.dataset.i]; if (navigator.clipboard) navigator.clipboard.writeText(x.key).catch(() => {}); toast('Clé de ' + x.email + ' copiée ✓');
+    }));
+  };
+  render();
+  el('ld-q').addEventListener('input', render);
+  el('ld-back').addEventListener('click', () => genRender('generate'));
+  el('ld-exp').addEventListener('click', () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(ledgerGet(), null, 1)], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'coffre-registre-' + new Date().toISOString().slice(0, 10) + '.json'; a.click(); URL.revokeObjectURL(url); toast('Registre sauvegardé');
+  });
+  el('ld-imp').addEventListener('click', () => el('ld-file').click());
+  el('ld-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const arr = JSON.parse(await f.text()); if (!Array.isArray(arr)) throw 0;
+      const m = new Map(ledgerGet().map((x) => [x.email, x]));
+      for (const x of arr) { if (x && x.email && x.key) { const em = normEmail(x.email); m.set(em, { email: em, key: x.key, date: x.date || '' }); } }
+      ledgerSave([...m.values()]); toast('Registre restauré'); render();
+    } catch (_) { toast('Fichier invalide'); }
+    e.target.value = '';
+  });
 }
 async function genDoSetup() {
   const err = el('gs-err'); err.textContent = '';
@@ -566,7 +624,9 @@ async function genDoGenerate() {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(id)) { err.textContent = 'E-mail invalide.'; return; }
   if (!genSignKey) { genRender('unlock'); return; }
   try {
-    el('gg-key').textContent = await genMakeLicence(id);
+    const key = await genMakeLicence(id);
+    ledgerAdd(id, key);
+    el('gg-key').textContent = key;
     el('gg-out').classList.remove('hidden');
     el('gg-copy').onclick = async () => {
       try { await navigator.clipboard.writeText(el('gg-key').textContent); el('gg-ok').textContent = 'Copié ✓'; }
