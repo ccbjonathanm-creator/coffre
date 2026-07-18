@@ -1,5 +1,5 @@
 /* Coffre — service worker : met l'app en cache pour un fonctionnement hors-ligne. */
-const CACHE = 'coffre-v33';
+const CACHE = 'coffre-v34';
 const ASSETS = [
   './',
   './index.html',
