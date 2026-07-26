@@ -6,7 +6,7 @@
   "use strict";
 
   const ICONS = new Set([
-    "antenna", "backspace", "bank", "beer", "briefcase", "broom", "bulb",
+    "addtx", "antenna", "backspace", "bank", "beer", "briefcase", "broom", "bulb",
     "burger", "calendar", "car", "card", "cart", "chart", "check",
     "cigarette", "clock", "coat", "coffee", "download", "droplet", "fish",
     "fuel", "game", "gift", "grad", "handshake", "hospital", "house", "key",

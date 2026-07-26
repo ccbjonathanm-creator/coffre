@@ -1,5 +1,5 @@
 /* Coffre — service worker : met l'app en cache pour un fonctionnement hors-ligne. */
-const CACHE = 'coffre-premium-v40';
+const CACHE = 'coffre-premium-v41';
 const ASSETS = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const ASSETS = [
   './icons/icon-maskable-512.png',
   './icons/favicon-64.png',
   './icons/apple-touch-icon.png',
+  './icons/premium3d/addtx.webp',
   './icons/premium3d/antenna.webp',
   './icons/premium3d/backspace.webp',
   './icons/premium3d/bank.webp',

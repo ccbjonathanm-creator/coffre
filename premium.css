@@ -118,7 +118,10 @@ body::after {
   filter:
     drop-shadow(0 5px 6px rgba(0, 0, 0, .42))
     drop-shadow(0 0 8px rgba(var(--accent-rgb), .1));
-  transform: translateZ(0);
+  /* Pas de translateZ(0) ici : il fige l'icone dans une couche GPU rasterisee a
+     sa petite taille (31 a 47 px), et tout zoom au survol etire alors cette
+     texture basse resolution au lieu de redessiner depuis le fichier 256 px.
+     C'est ce qui rendait les icones floues au passage de la souris. */
   transition: transform .22s cubic-bezier(.2, .8, .2, 1), filter .22s ease;
 }
 
@@ -666,7 +669,8 @@ button:not(:disabled):active {
 }
 
 .tx-item:hover .tx-ico .ic3d {
-  transform: translateY(-2px) rotate(-3deg) scale(1.05);
+  /* Sans rotation : quelques degres sur une image de 40 px rendent les bords flous. */
+  transform: translateY(-2px) scale(1.05);
 }
 
 .tx-cat {
@@ -1008,7 +1012,7 @@ button:not(:disabled):active {
 
 .tab:hover .tab-ico img,
 .tab:hover .tab-ico .cf-icon3d {
-  transform: translateY(-2px) rotate(-3deg) scale(1.08);
+  transform: translateY(-2px) scale(1.08);
 }
 
 .tab.active .tab-ico {
@@ -1074,7 +1078,7 @@ button:not(:disabled):active {
 }
 
 .tab-add:hover .tab-add-btn {
-  transform: translateY(-3px) rotate(-2deg) scale(1.04);
+  transform: translateY(-3px) scale(1.04);
   box-shadow:
     0 21px 42px rgba(44, 155, 224, .49),
     0 0 0 7px rgba(var(--accent-rgb), .09),
