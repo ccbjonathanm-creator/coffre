@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v31';
+const APP_VERSION = 'v39';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -505,7 +505,7 @@ function genRender(screen) {
   if (screen === 'setup') {
     sheet.innerHTML = `
       <div class="sheet-grip"></div>
-      <h2>🔑 Générateur — configuration</h2>
+      <h2>${uiIcon('key')} Générateur — configuration</h2>
       <p class="muted" style="font-size:13px;margin:-8px 0 14px">Première fois. Colle ta clé secrète et choisis un mot de passe maître. La clé sera chiffrée et gardée <b>uniquement sur ce téléphone</b>.</p>
       <div class="field"><label>Clé secrète (fournie par Claude)</label>
         <textarea id="gs-key" class="resil-area" rows="4" placeholder='{"key_ops":["sign"],...}'></textarea></div>
@@ -513,13 +513,13 @@ function genRender(screen) {
         <input id="gs-pw" type="password" placeholder="Un mot de passe fort"></div>
       <div class="field"><label>Confirme le mot de passe</label>
         <input id="gs-pw2" type="password" placeholder="Retape-le"></div>
-      <button class="btn" id="gs-go">🔒 Chiffrer et enregistrer</button>
+      <button class="btn" id="gs-go">${uiIcon('lock')} Chiffrer et enregistrer</button>
       <p id="gs-err" class="lock-error" style="text-align:center"></p>`;
     el('gs-go').addEventListener('click', genDoSetup);
   } else if (screen === 'unlock') {
     sheet.innerHTML = `
       <div class="sheet-grip"></div>
-      <h2>🔑 Générateur</h2>
+      <h2>${uiIcon('key')} Générateur</h2>
       <div class="field"><label>Mot de passe maître</label>
         <input id="gu-pw" type="password" placeholder="Ton mot de passe"></div>
       <button class="btn" id="gu-go">Déverrouiller</button>
@@ -532,19 +532,19 @@ function genRender(screen) {
   } else {
     sheet.innerHTML = `
       <div class="sheet-grip"></div>
-      <h2>🔑 Générer une licence</h2>
+    <h2>${uiIcon('key')} Générer une licence</h2>
       <div class="field"><label>E-mail d'achat du client</label>
         <input id="gg-id" type="email" placeholder="client@mail.com" autocapitalize="off" spellcheck="false" style="text-align:center;font-weight:700"></div>
       <button class="btn" id="gg-go">Générer la clé</button>
       <div id="gg-out" class="field hidden" style="margin-top:16px">
         <label>Clé à donner au client</label>
         <div id="gg-key" class="key" style="word-break:break-all;user-select:all;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:12px;padding:14px;font-family:monospace;font-size:13px"></div>
-        <button class="btn btn-2" id="gg-copy" style="margin-top:10px">📋 Copier la clé</button>
+    <button class="btn btn-2" id="gg-copy" style="margin-top:10px">${uiIcon('receipt')} Copier la clé</button>
         <p id="gg-ok" class="ok" style="color:var(--green);font-size:13px;text-align:center"></p>
       </div>
       <p id="gg-err" class="lock-error" style="text-align:center"></p>
-      <button class="btn btn-2" id="gg-ledger" style="margin-top:10px">📋 Registre des ventes (${ledgerGet().length})</button>
-      <button class="btn btn-2" id="gg-lock" style="margin-top:10px">🔒 Verrouiller</button>`;
+    <button class="btn btn-2" id="gg-ledger" style="margin-top:10px">${uiIcon('receipt')} Registre des ventes (${ledgerGet().length})</button>
+    <button class="btn btn-2" id="gg-lock" style="margin-top:10px">${uiIcon('lock')} Verrouiller</button>`;
     el('gg-go').addEventListener('click', genDoGenerate);
     el('gg-ledger').addEventListener('click', genRenderLedger);
     el('gg-lock').addEventListener('click', () => { genSignKey = null; genRender('unlock'); });
@@ -554,13 +554,13 @@ function genRenderLedger() {
   const sheet = el('sheet');
   sheet.innerHTML = `
     <div class="sheet-grip"></div>
-    <h2>📋 Registre des ventes</h2>
+    <h2>${uiIcon('receipt')} Registre des ventes</h2>
     <p class="muted" style="font-size:13px;margin:-8px 0 12px">Tes acheteurs, gardés sur ce téléphone. Cherche un e-mail pour vérifier un achat et recopier sa clé.</p>
     <div class="field"><input id="ld-q" type="search" placeholder="Chercher un e-mail…" autocomplete="off"></div>
     <div id="ld-list" style="max-height:44vh;overflow:auto"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-2" id="ld-exp" style="flex:1">⬇ Sauvegarder</button>
-      <button class="btn btn-2" id="ld-imp" style="flex:1">⬆ Restaurer</button>
+      <button class="btn btn-2" id="ld-exp" style="flex:1">${uiIcon('download')} Sauvegarder</button>
+      <button class="btn btn-2" id="ld-imp" style="flex:1">${uiIcon('upload')} Restaurer</button>
     </div>
     <button class="btn" id="ld-back" style="margin-top:10px">← Retour</button>
     <input id="ld-file" type="file" accept=".json,application/json" class="hidden">`;
@@ -640,7 +640,7 @@ function trialBanner() {
   const ti = trialInfo();
   const col = ti.daysLeft <= 3 ? 'var(--red)' : 'var(--orange)';
   return `<div class="install-banner" style="border-color:${col}">
-    <span style="font-size:22px">⏳</span>
+    <span class="banner-premium-icon">${uiIcon('clock')}</span>
     <span class="txt">Version d'essai : <b style="color:${col}">${ti.daysLeft} jour(s)</b> restant(s).</span>
     <button id="unlock-lic">Débloquer</button>
   </div>`;
@@ -886,14 +886,14 @@ function buildInsights() {
   const prevSpent = sumBy(txOfMonth(prevKey), 'expense');
 
   if (state.transactions.length === 0) {
-    out.push(['👋', 'Bienvenue ! Ajoute ta première opération avec le bouton <b>+</b>. Tout reste chiffré sur ton téléphone.']);
+    out.push(['spark', 'Bienvenue ! Ajoute ta première opération avec le bouton <b>+</b>. Tout reste chiffré sur ton téléphone.']);
     return out;
   }
 
   if (prevSpent > 0) {
     const diff = Math.round(((spent - prevSpent) / prevSpent) * 100);
-    if (diff > 5) out.push(['📈', `Tu as dépensé <b>${diff}% de plus</b> que le mois dernier à la même échelle.`]);
-    else if (diff < -5) out.push(['📉', `Bravo, <b>${Math.abs(diff)}% de moins</b> que le mois dernier. Continue.`]);
+    if (diff > 5) out.push(['chart', `Tu as dépensé <b>${diff}% de plus</b> que le mois dernier à la même échelle.`]);
+    else if (diff < -5) out.push(['chartdown', `Bravo, <b>${Math.abs(diff)}% de moins</b> que le mois dernier. Continue.`]);
   }
 
   // plus gros poste
@@ -901,7 +901,7 @@ function buildInsights() {
   const top = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
   if (top) {
     const c = catById(top[0]);
-    out.push(['🔎', `Ton plus gros poste ce mois : <b>${c.emoji} ${c.name}</b> (${euro(top[1])}).`]);
+    out.push(['search', `Ton plus gros poste ce mois : <b class="insight-category">${iconImg(c.id)} ${c.name}</b> (${euro(top[1])}).`]);
   }
 
   // alertes budget (sur le budget effectif du mois : report inclus si activé)
@@ -910,9 +910,9 @@ function buildInsights() {
     const limit = effectiveBudget(cat, mk);
     const used = byCat[cat] || 0;
     const c = catById(cat);
-    if (limit <= 0) { out.push(['⚠️', `Budget <b>${c.name}</b> épuisé par le report du mois dernier.`]); continue; }
-    if (used > limit) { out.push(['⚠️', `Budget <b>${c.name}</b> dépassé de <b>${euro(used - limit)}</b>.`]); }
-    else if (used >= limit * 0.8) { out.push(['🟠', `Budget <b>${c.name}</b> presque atteint (${Math.round(used / limit * 100)}%).`]); }
+    if (limit <= 0) { out.push(['warning', `Budget <b>${c.name}</b> épuisé par le report du mois dernier.`]); continue; }
+    if (used > limit) { out.push(['warning', `Budget <b>${c.name}</b> dépassé de <b>${euro(used - limit)}</b>.`]); }
+    else if (used >= limit * 0.8) { out.push(['warning', `Budget <b>${c.name}</b> presque atteint (${Math.round(used / limit * 100)}%).`]); }
   }
 
   return out.slice(0, 4);
@@ -1051,9 +1051,11 @@ const ICON_CHOICES = ['shield', 'repeat', 'moneywings', 'bank', 'house', 'car', 
   'bulb', 'droplet', 'phone', 'antenna', 'tv', 'music', 'game', 'cart', 'burger', 'coffee', 'pill',
   'trophy', 'plane', 'gift', 'briefcase', 'pig', 'cigarette', 'coat', 'beer', 'paw', 'card', 'slot',
   'medical', 'stetho', 'hospital', 'grad', 'fish', 'wrench', 'package'];
-// Icônes 3D (Fluent, embarquées localement). L'icône d'une opération = icône perso sinon catégorie.
-function iconSrc(slug) { return 'icons/i3d/' + slug + '.png'; }
-function iconImg(slug) { return '<img class="ic3d" src="' + iconSrc(slug) + '" alt="" loading="lazy">'; }
+// Icônes SVG 3D premium. L'icône d'une opération = icône perso sinon catégorie.
+function iconImg(slug) { return window.CoffreIcons3D(slug, 'ic3d'); }
+function uiIcon(slug, extraClass) {
+  return window.CoffreIcons3D(slug, 'ui-icon3d' + (extraClass ? ' ' + extraClass : ''));
+}
 function txIconSlug(t) {
   if (t && t.icon) return t.icon;                 // icône choisie explicitement sur CETTE opération
   const learned = t && iconFromRules(t.note);     // icône apprise pour ce marchand
@@ -1190,6 +1192,7 @@ function viewDashboard() {
     safeBlock = `
       <div class="card">
         <div class="safe">
+          <span class="safe-premium-icon">${uiIcon('moneywings')}</span>
           <div>
             <div class="big" style="color:${col}">${euro(Math.max(0, perDay))}</div>
             <div class="lbl">à dépenser par jour d'ici la fin du mois</div>
@@ -1200,8 +1203,9 @@ function viewDashboard() {
         </div>
       </div>`;
   } else {
-    safeBlock = `<div class="card muted" style="font-size:13px">
-      💡 Définis tes budgets ou tes revenus mensuels (onglet Budgets / Réglages) pour voir ton <b>reste à vivre par jour</b>.
+    safeBlock = `<div class="card muted info-card" style="font-size:13px">
+      <span class="inline-premium-icon">${uiIcon('bulb')}</span>
+      <span>Définis tes budgets ou tes revenus mensuels (onglet Budgets / Réglages) pour voir ton <b>reste à vivre par jour</b>.</span>
     </div>`;
   }
 
@@ -1209,7 +1213,7 @@ function viewDashboard() {
   const insightsHtml = insights.length ? `
     <div class="section-title">Conseils intelligents</div>
     <div class="card">
-      ${insights.map(([e, t]) => `<div class="insight"><span class="emo">${e}</span><span class="txt">${t}</span></div>`).join('')}
+      ${insights.map(([e, t]) => `<div class="insight"><span class="emo">${uiIcon(e)}</span><span class="txt">${t}</span></div>`).join('')}
     </div>` : '';
 
   // récurrences à venir ce mois (touche pour enregistrer en une fois)
@@ -1234,14 +1238,14 @@ function viewDashboard() {
   // dernières opérations
   const recent = state.transactions.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 4);
   const recentHtml = recent.length ? recent.map(txRow).join('') :
-    `<div class="empty"><span class="big-emo">🗒️</span>Aucune opération pour l'instant.</div>`;
+    `<div class="empty"><span class="big-emo">${uiIcon('receipt')}</span>Aucune opération pour l'instant.</div>`;
 
   return `
     ${trialBanner()}
     ${installBanner()}
     <div class="page-head">
       <div>
-        <h1 class="page-title">Bonjour 👋</h1>
+        <h1 class="page-title">Bonjour <span class="title-premium-icon">${uiIcon('spark')}</span></h1>
         <p class="page-sub" style="text-transform:capitalize">${monthLabel}</p>
       </div>
     </div>
@@ -1254,8 +1258,9 @@ function viewDashboard() {
         <div class="hero-stat"><p class="l">↑ Dépenses du mois</p><p class="v">${euro(expense)}</p></div>
       </div>
     </div>
-    ${acct === null ? `<div class="card muted" style="font-size:13px;margin-top:12px">
-      🏦 Pour afficher le <b>vrai solde de ton compte</b>, indique ton <b>solde de départ</b> dans Réglages → Solde du compte. Sinon Coffre ne connaît pas ce qu'il y avait avant tes opérations et le total ne correspond pas à ta banque.
+    ${acct === null ? `<div class="card muted info-card" style="font-size:13px;margin-top:12px">
+      <span class="inline-premium-icon">${uiIcon('bank')}</span>
+      <span>Pour afficher le <b>vrai solde de ton compte</b>, indique ton <b>solde de départ</b> dans Réglages → Solde du compte. Sinon Coffre ne connaît pas ce qu'il y avait avant tes opérations et le total ne correspond pas à ta banque.</span>
     </div>` : ''}
 
     <div style="height:14px"></div>
@@ -1304,7 +1309,7 @@ function filteredTx() {
 function renderTxListHtml() {
   const list = filteredTx();
   if (!list.length) {
-    return `<div class="empty"><span class="big-emo">🔍</span>Aucune opération ne correspond.</div>`;
+    return `<div class="empty"><span class="big-emo">${uiIcon('search')}</span>Aucune opération ne correspond.</div>`;
   }
   const anyFilter = txFilter.q || txFilter.month !== 'all' || txFilter.cat !== 'all' || txFilter.type !== 'all';
   let solde = 0;
@@ -1329,7 +1334,7 @@ function renderTxListHtml() {
 function viewTx() {
   if (!state.transactions.length) {
     return `<div class="page-head"><h1 class="page-title">Opérations</h1></div>
-      <div class="empty"><span class="big-emo">🗒️</span>Aucune opération.<br>Appuie sur <b>+</b> pour commencer.</div>`;
+      <div class="empty"><span class="big-emo">${uiIcon('receipt')}</span>Aucune opération.<br>Appuie sur <b>+</b> pour commencer.</div>`;
   }
   const months = availableMonths();
   if (txFilter.month !== 'all' && !months.includes(txFilter.month)) txFilter.month = 'all';
@@ -1344,13 +1349,13 @@ function viewTx() {
   const catOpts = ['<option value="all">Toutes catégories</option>'].concat(
     catsPresent.map((id) => {
       const c = catById(id);
-      return `<option value="${id}" ${txFilter.cat === id ? 'selected' : ''}>${c.emoji} ${c.name}</option>`;
+      return `<option value="${id}" ${txFilter.cat === id ? 'selected' : ''}>${c.name}</option>`;
     })).join('');
 
   return `
     <div class="page-head"><h1 class="page-title">Opérations</h1></div>
     <div class="filters">
-      <input id="flt-q" class="flt-search" type="text" inputmode="search" placeholder="🔍 Rechercher (libellé, catégorie)" value="${escapeHtml(txFilter.q)}">
+      <input id="flt-q" class="flt-search" type="text" inputmode="search" placeholder="Rechercher (libellé, catégorie)" value="${escapeHtml(txFilter.q)}">
       <div class="seg flt-seg">
         <button data-ftype="all" class="${txFilter.type === 'all' ? 'on-all' : ''}">Tout</button>
         <button data-ftype="expense" class="${txFilter.type === 'expense' ? 'on-exp' : ''}">Dépenses</button>
@@ -1367,7 +1372,7 @@ function viewTx() {
 function donutSvg(byCat, totalExp) {
   const entries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
   if (!entries.length || totalExp <= 0) {
-    return `<div class="empty" style="padding:20px"><span class="big-emo">📊</span>Pas encore de dépenses ce mois.</div>`;
+    return `<div class="empty" style="padding:20px"><span class="big-emo">${uiIcon('chart')}</span>Pas encore de dépenses ce mois.</div>`;
   }
   const r = 42, C = 2 * Math.PI * r;
   let offset = 0;
@@ -1467,7 +1472,7 @@ function viewBudgets() {
     <div class="section-title">Budgets de <span style="text-transform:capitalize">${moisLabel}</span></div>
     <div class="card">
       ${hasBudgets ? budgetRows : '<div class="muted" style="font-size:13px">Aucun budget défini. Fixe une limite par catégorie pour être alerté avant de déraper.</div>'}
-      <button class="btn btn-2" id="edit-budgets" style="margin-top:14px">🎯 Modifier mes budgets</button>
+      <button class="btn btn-2" id="edit-budgets" style="margin-top:14px">${uiIcon('target')} Modifier mes budgets</button>
     </div>
   `;
 }
@@ -1475,7 +1480,7 @@ function viewBudgets() {
 // ---------------- Vue : Liste noire (abonnements) ----------------
 function viewAbos() {
   if (!state.transactions.length) {
-    return `<div class="section-title">🎯 Liste noire</div>
+    return `<div class="section-title">${uiIcon('target')} Liste noire</div>
       <div class="card muted" style="font-size:13px">
         Importe ou saisis tes opérations (onglet Réglages ou bouton <b>+</b>) : je repère
         ensuite tout seul tes abonnements récurrents et je les chiffre à l'année.
@@ -1483,15 +1488,16 @@ function viewAbos() {
   }
   const { list, ignores } = collectAbonnements();
   const aideManuel = `
-    <div class="card muted" style="font-size:12px">
-      💡 Un abonnement manque à l'appel (mensualité d'assurance, forfait mobile…) ?
-      Ouvre la dépense dans l'onglet <b>Opérations</b> et touche « 🎯 Marquer comme abonnement ».
+    <div class="card muted info-card" style="font-size:12px">
+      <span class="inline-premium-icon">${uiIcon('bulb')}</span>
+      <span>Un abonnement manque à l'appel (mensualité d'assurance, forfait mobile…) ?
+      Ouvre la dépense dans l'onglet <b>Opérations</b> et touche « Marquer comme abonnement ».</span>
     </div>`;
 
   if (!list.length) {
-    return `<div class="section-title">🎯 Liste noire</div>
+    return `<div class="section-title">${uiIcon('target')} Liste noire</div>
       <div class="card" style="text-align:center;padding:24px">
-        <div style="font-size:40px">✅</div>
+        <div class="success-premium-icon">${uiIcon('check')}</div>
         <div style="margin-top:8px"><b>Aucun abonnement récurrent détecté.</b></div>
         <div class="muted" style="font-size:12px;margin-top:6px">
           Il me faut au moins 3 prélèvements réguliers du même marchand, à montant stable, pour flairer un abonnement.
@@ -1529,7 +1535,7 @@ function viewAbos() {
     const dejaSuivi = suivable && recurrenceExistePour(a);
     const action3 = !suivable ? ''
       : dejaSuivi ? '<span class="abo-badge on">✓ suivi</span>'
-      : `<button class="btn btn-2 abo-btn" data-torecur="${escapeHtml(a.uid)}">➕ Suivre</button>`;
+      : `<button class="btn btn-2 abo-btn" data-torecur="${escapeHtml(a.uid)}">${uiIcon('plus')} Suivre</button>`;
     return `
       <div class="card abo-card">
         <div class="abo-top">
@@ -1544,7 +1550,7 @@ function viewAbos() {
           </div>
         </div>
         <div class="abo-actions">
-          <button class="btn btn-danger abo-btn" data-resil="${escapeHtml(a.uid)}">✍️ Résilier</button>
+          <button class="btn btn-danger abo-btn" data-resil="${escapeHtml(a.uid)}">${uiIcon('receipt')} Résilier</button>
           ${action3}
           ${action2}
         </div>
@@ -1552,7 +1558,7 @@ function viewAbos() {
   }).join('');
 
   return `
-    <div class="section-title">🎯 Liste noire</div>
+    <div class="section-title">${uiIcon('target')} Liste noire</div>
     ${hero}
     <div class="muted" style="font-size:11px;margin:10px 2px">
       Détection locale sur tes opérations. Un abonnement mal classé ? Touche « Pas un abonnement », il disparaît de la liste.
@@ -1678,7 +1684,7 @@ Dans l'attente, je vous prie d'agréer, Madame, Monsieur, l'expression de mes sa
       La résiliation par lettre recommandée fait foi.
     </p>
     <textarea id="resil-txt" class="resil-area" rows="16">${escapeHtml(lettre)}</textarea>
-    <button class="btn" id="resil-copy" style="margin-top:12px">📋 Copier la lettre</button>
+    <button class="btn" id="resil-copy" style="margin-top:12px">${uiIcon('receipt')} Copier la lettre</button>
     <button class="btn btn-2" id="resil-close" style="margin-top:10px">Fermer</button>
   `;
   el('resil-copy').addEventListener('click', () => {
@@ -1726,7 +1732,7 @@ function renderAboFlagSheet() {
         ${FREQS.map((f) => `<button class="cat-chip ${f.id === d.frequence ? 'sel' : ''}" data-freq="${f.id}">${f.label}</button>`).join('')}
       </div>
     </div>
-    <button class="btn" id="abo-flag-save">🎯 Ajouter à la liste noire</button>
+    <button class="btn" id="abo-flag-save">${uiIcon('target')} Ajouter à la liste noire</button>
     <button class="btn btn-2" id="abo-flag-cancel" style="margin-top:10px">Annuler</button>
   `;
   sheet.querySelectorAll('[data-freq]').forEach((n) =>
@@ -1778,7 +1784,7 @@ function viewSettings() {
     <div class="card">
       <div class="set-row">
         <div>
-          <div class="set-label">${licensed ? '✅ Version à vie' : '⏳ Version d\'essai'}</div>
+          <div class="set-label">${licensed ? uiIcon('check') + ' Version à vie' : uiIcon('clock') + ' Version d\'essai'}</div>
           <div class="set-desc">${licensed ? 'Débloquée, merci !' : `${trialInfo().daysLeft} jour(s) restant(s)`}</div>
         </div>
         <button class="btn btn-2" style="width:auto;padding:8px 14px" id="open-licence">${licensed ? 'Voir' : 'Débloquer'}</button>
@@ -1788,7 +1794,7 @@ function viewSettings() {
     <div class="section-title">Sécurité</div>
     <div class="card">
       <div class="set-row">
-        <div><div class="set-label">🔒 Verrouillage auto</div><div class="set-desc">Après inactivité</div></div>
+        <div><div class="set-label">${uiIcon('lock')} Verrouillage auto</div><div class="set-desc">Après inactivité</div></div>
         <select id="autolock" style="width:auto;padding:8px 10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
           <option value="1" ${s.autoLockMin == 1 ? 'selected' : ''}>1 min</option>
           <option value="3" ${s.autoLockMin == 3 ? 'selected' : ''}>3 min</option>
@@ -1797,11 +1803,11 @@ function viewSettings() {
         </select>
       </div>
       <div class="set-row">
-        <div><div class="set-label">🔑 Changer le code PIN</div></div>
+        <div><div class="set-label">${uiIcon('key')} Changer le code PIN</div></div>
         <button class="btn btn-2" style="width:auto;padding:8px 14px" id="change-pin">Changer</button>
       </div>
       <div class="set-row">
-        <div><div class="set-label">🔐 Verrouiller maintenant</div></div>
+        <div><div class="set-label">${uiIcon('shield')} Verrouiller maintenant</div></div>
         <button class="btn btn-2" style="width:auto;padding:8px 14px" id="lock-now">Verrouiller</button>
       </div>
     </div>
@@ -1809,15 +1815,15 @@ function viewSettings() {
     <div class="section-title">Budget</div>
     <div class="card">
       <div class="set-row">
-        <div><div class="set-label">💶 Revenus mensuels</div><div class="set-desc">Sert au "reste à vivre" si pas de budgets</div></div>
+        <div><div class="set-label">${uiIcon('moneywings')} Revenus mensuels</div><div class="set-desc">Sert au "reste à vivre" si pas de budgets</div></div>
         <input id="income" type="text" inputmode="decimal" value="${s.monthlyIncome || ''}" placeholder="0" style="width:110px;text-align:right;padding:10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
       </div>
       <div class="set-row">
-        <div><div class="set-label">🔁 Report du budget</div><div class="set-desc">Le solde non dépensé s'ajoute au mois suivant</div></div>
+        <div><div class="set-label">${uiIcon('repeat')} Report du budget</div><div class="set-desc">Le solde non dépensé s'ajoute au mois suivant</div></div>
         <label class="switch"><input type="checkbox" id="rollover-toggle" ${s.budgetRollover ? 'checked' : ''}><span class="track"></span></label>
       </div>
       <div class="set-row">
-        <div><div class="set-label">🌗 Thème clair</div></div>
+        <div><div class="set-label">${uiIcon('bulb')} Thème clair</div></div>
         <label class="switch"><input type="checkbox" id="theme-toggle" ${s.theme === 'light' ? 'checked' : ''}><span class="track"></span></label>
       </div>
     </div>
@@ -1826,18 +1832,18 @@ function viewSettings() {
     <div class="card">
       <div class="set-desc" style="margin-bottom:12px">Loyer, abonnements, salaire… déclare ce qui revient chaque mois. Le tableau de bord <b>met de côté</b> ces montants dans ton reste à vivre tant que tu ne les as pas enregistrés.</div>
       ${recurringListHtml()}
-      <button class="btn btn-2" id="add-recurring" style="margin-top:12px">➕ Ajouter une récurrence</button>
+      <button class="btn btn-2" id="add-recurring" style="margin-top:12px">${uiIcon('plus')} Ajouter une récurrence</button>
     </div>
 
     <div class="section-title">Solde du compte</div>
     <div class="card">
       <div class="set-desc" style="margin-bottom:12px">Reporte le <b>solde exact affiché par ta banque</b> à une date, <b>avant</b> les opérations qui suivent (par ex. le dernier solde connu juste avant ta première opération importée). Coffre ajoute ensuite tes opérations des jours suivants pour afficher ton <b>vrai solde de compte</b>.</div>
       <div class="set-row">
-        <div><div class="set-label">💰 Solde de départ</div></div>
+        <div><div class="set-label">${uiIcon('moneywings')} Solde de départ</div></div>
         <input id="start-balance" type="text" inputmode="decimal" value="${s.startBalance != null ? s.startBalance : ''}" placeholder="0" style="width:120px;text-align:right;padding:10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
       </div>
       <div class="set-row">
-        <div><div class="set-label">📅 À cette date</div><div class="set-desc">Solde de ce jour-là, avant les opérations suivantes</div></div>
+        <div><div class="set-label">${uiIcon('calendar')} À cette date</div><div class="set-desc">Solde de ce jour-là, avant les opérations suivantes</div></div>
         <input id="start-date" type="date" value="${s.startBalanceDate || ''}" max="${todayISO()}" style="padding:10px;border-radius:10px;background:var(--card-2);color:var(--text);border:1px solid var(--line)">
       </div>
       <button class="btn btn-2" id="save-start" style="margin-top:12px">Enregistrer le solde de départ</button>
@@ -1846,21 +1852,21 @@ function viewSettings() {
     <div class="section-title">Importer un relevé</div>
     <div class="card">
       <div class="set-desc" style="margin-bottom:12px">Importe le fichier <b>Excel (.xlsx), CSV ou PDF</b> exporté depuis ta banque. Il est lu <b>sur ton téléphone</b>, jamais envoyé ailleurs. Tu vérifies tout avant de valider, et les doublons sont ignorés. <b>Excel reste le plus fiable</b> ; le PDF marche mais vérifie bien l'aperçu.</div>
-      <button class="btn" id="import-stmt">📥 Importer un relevé bancaire</button>
+      <button class="btn" id="import-stmt">${uiIcon('download')} Importer un relevé bancaire</button>
       <input type="file" id="stmt-file" accept=".csv,.xls,.xlsx,.pdf,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
-      <button class="btn btn-2" id="recat" style="margin-top:10px">🏷️ Re-catégoriser mes opérations</button>
+      <button class="btn btn-2" id="recat" style="margin-top:10px">${uiIcon('tag')} Re-catégoriser mes opérations</button>
     </div>
 
     <div class="section-title">Mes données</div>
     <div class="card">
       <div class="set-desc" style="margin-bottom:12px">Tes données sont chiffrées et stockées <b>uniquement sur cet appareil</b>. La sauvegarde est elle aussi <b>chiffrée</b> : le fichier est illisible sans ton code. Fais-en une régulièrement : si tu perds le téléphone ou oublies ton code, elles sont irrécupérables.</div>
       <div class="btn-row">
-        <button class="btn btn-2" id="export">⬇️ Sauvegarder</button>
-        <button class="btn btn-2" id="import">⬆️ Restaurer</button>
+        <button class="btn btn-2" id="export">${uiIcon('download')} Sauvegarder</button>
+        <button class="btn btn-2" id="import">${uiIcon('upload')} Restaurer</button>
       </div>
       <input type="file" id="import-file" accept="application/json" class="hidden">
-      <button class="btn btn-2" id="clear-tx" style="margin-top:12px">🧹 Effacer les opérations</button>
-      <button class="btn btn-danger" id="wipe" style="margin-top:10px">🗑️ Tout effacer (code compris)</button>
+      <button class="btn btn-2" id="clear-tx" style="margin-top:12px">${uiIcon('broom')} Effacer les opérations</button>
+      <button class="btn btn-danger" id="wipe" style="margin-top:10px">${uiIcon('trash')} Tout effacer (code compris)</button>
     </div>
 
     <div class="section-title">Mise à jour</div>
@@ -1872,8 +1878,8 @@ function viewSettings() {
         </div>
         <span class="ver-pill">Coffre ${APP_VERSION}</span>
       </div>
-      <button class="btn ${updateReady ? '' : 'btn-2'}" id="do-update" style="margin-top:12px">${updateReady ? '⬇️ Installer la nouvelle version' : '🔄 Mettre à jour'}</button>
-      <div class="set-desc" style="margin-top:10px">🔒 Une mise à jour <b>n'efface jamais</b> tes opérations ni tes réglages. Elle ne remplace que l'application.</div>
+      <button class="btn ${updateReady ? '' : 'btn-2'}" id="do-update" style="margin-top:12px">${updateReady ? uiIcon('download') + ' Installer la nouvelle version' : uiIcon('repeat') + ' Mettre à jour'}</button>
+      <div class="set-desc secure-note" style="margin-top:10px">${uiIcon('lock')} <span>Une mise à jour <b>n'efface jamais</b> tes opérations ni tes réglages. Elle ne remplace que l'application.</span></div>
     </div>
 
     <p id="ver-foot" class="muted" style="text-align:center;font-size:12px;margin-top:20px">Coffre ${APP_VERSION} • 100% hors-ligne • chiffré AES-256</p>
@@ -1905,7 +1911,7 @@ function recurringListHtml() {
 function installBanner() {
   if (!deferredInstall) return '';
   return `<div class="install-banner">
-    <span style="font-size:22px">📲</span>
+    <span class="banner-premium-icon">${uiIcon('download')}</span>
     <span class="txt">Installe Coffre sur ton écran d'accueil pour un accès rapide.</span>
     <button id="do-install">Installer</button>
   </div>`;
@@ -2108,7 +2114,7 @@ function renderSheet() {
       <input id="f-date" type="date" value="${draft.date}" max="${todayISO()}">
     </div>
     <button class="btn" id="f-save">${editingId ? 'Enregistrer' : 'Ajouter'}</button>
-    ${editingId && draft.type === 'expense' ? '<button class="btn btn-2" id="f-abo" style="margin-top:10px">🎯 Marquer comme abonnement</button>' : ''}
+    ${editingId && draft.type === 'expense' ? '<button class="btn btn-2" id="f-abo" style="margin-top:10px">' + uiIcon('target') + ' Marquer comme abonnement</button>' : ''}
     ${editingId ? '<button class="btn btn-danger" id="f-delete" style="margin-top:10px">Supprimer</button>' : ''}
   `;
 
@@ -2426,7 +2432,7 @@ async function exportData() {
   a.download = `coffre-sauvegarde-${todayISO()}.coffre.json`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('Sauvegarde chiffrée téléchargée 🔒');
+  toast('Sauvegarde chiffrée téléchargée');
 }
 async function applyRestored(obj) {
   if (!obj || !Array.isArray(obj.transactions)) throw new Error('format');
@@ -2794,7 +2800,7 @@ function renderImportSheet() {
     <div class="sheet-grip"></div>
     <h2>Importer un relevé</h2>
     <p class="muted" style="font-size:13px;margin:-8px 0 14px">Vérifie que les colonnes sont bien reconnues, puis valide.</p>
-    ${imp.isPdf ? `<div class="install-banner" style="border-color:var(--orange);margin-bottom:14px"><span style="font-size:20px">⚠️</span><span class="txt">Lecture PDF : vérifie surtout les <b>montants</b> et le sens (dépense/revenu). Si une colonne "Solde" existe, ne la choisis pas comme montant. En cas de souci, préfère l'export Excel.</span></div>` : ''}
+    ${imp.isPdf ? `<div class="install-banner" style="border-color:var(--orange);margin-bottom:14px"><span class="banner-premium-icon">${uiIcon('warning')}</span><span class="txt">Lecture PDF : vérifie surtout les <b>montants</b> et le sens (dépense/revenu). Si une colonne "Solde" existe, ne la choisis pas comme montant. En cas de souci, préfère l'export Excel.</span></div>` : ''}
 
     <div class="field">
       <label>Colonne Date</label>

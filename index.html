@@ -15,6 +15,7 @@
   <link rel="icon" href="icons/favicon-64.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="premium.css" />
 </head>
 <body>
 
@@ -38,7 +39,7 @@
         <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
         <button class="key-ghost" data-k="reset">Effacer</button>
         <button data-k="0">0</button>
-        <button class="key-ghost" data-k="del">⌫</button>
+        <button class="key-ghost" data-k="del" aria-label="Effacer le dernier chiffre"><span data-cf-icon="backspace"></span></button>
       </div>
     </div>
   </section>
@@ -47,11 +48,7 @@
   <section id="licence-gate" class="lock hidden">
     <div class="lock-inner">
       <div class="lock-logo" aria-hidden="true">
-        <svg viewBox="0 0 100 100" width="64" height="64">
-          <rect x="20" y="44" width="60" height="42" rx="8" fill="none" stroke="currentColor" stroke-width="6"/>
-          <path d="M32 44 V32 a18 18 0 0 1 36 0 V44" fill="none" stroke="currentColor" stroke-width="6"/>
-          <circle cx="50" cy="63" r="6" fill="currentColor"/>
-        </svg>
+        <span class="lock-premium-icon" data-cf-icon="lock"></span>
       </div>
       <h1 class="lock-title">Essai terminé</h1>
       <p class="lock-subtitle">Débloque la version à vie pour continuer — 15 €</p>
@@ -70,22 +67,22 @@
 
     <nav class="tabbar" id="tabbar">
       <button data-tab="dashboard" class="tab active">
-        <span class="tab-ico">🏠</span><span class="tab-lbl">Accueil</span>
+        <span class="tab-ico" data-cf-icon="home"></span><span class="tab-lbl">Accueil</span>
       </button>
       <button data-tab="tx" class="tab">
-        <span class="tab-ico">📝</span><span class="tab-lbl">Opérations</span>
+        <span class="tab-ico" data-cf-icon="receipt"></span><span class="tab-lbl">Opérations</span>
       </button>
       <button data-tab="add" class="tab tab-add" aria-label="Ajouter">
-        <span class="tab-add-btn">＋</span>
+        <span class="tab-add-btn" data-cf-icon="plus"></span>
       </button>
       <button data-tab="budgets" class="tab">
-        <span class="tab-ico">📊</span><span class="tab-lbl">Budgets</span>
+        <span class="tab-ico" data-cf-icon="pig"></span><span class="tab-lbl">Budgets</span>
       </button>
       <button data-tab="abos" class="tab">
-        <span class="tab-ico">🎯</span><span class="tab-lbl">Abos</span>
+        <span class="tab-ico" data-cf-icon="repeat"></span><span class="tab-lbl">Abos</span>
       </button>
       <button data-tab="settings" class="tab">
-        <span class="tab-ico">⚙️</span><span class="tab-lbl">Réglages</span>
+        <span class="tab-ico" data-cf-icon="settings"></span><span class="tab-lbl">Réglages</span>
       </button>
     </nav>
   </div>
@@ -99,6 +96,7 @@
 
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/pdf.min.js"></script>
+  <script src="icons-premium.js"></script>
   <script src="app.js"></script>
   <script src="install-pwa.js" data-app-name="Coffre" data-accent="#6d7cff"></script>
 </body>
