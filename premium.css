@@ -1032,58 +1032,8 @@ button:not(:disabled):active {
   white-space: nowrap;
 }
 
-.tab-add {
-  flex: 0 0 61px;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.tab-add-btn {
-  position: relative;
-  width: 58px;
-  height: 58px;
-  /* Aligné sur les autres onglets : pas de débordement au-dessus de la barre.
-     (Une marge négative ici décalait le bouton vers le haut, d'autant plus sur
-     mobile où la largeur retombe à 54px sans que la marge suive.) */
-  margin-top: 0;
-  overflow: hidden;
-  border: 1px solid rgba(213, 248, 255, .56);
-  background:
-    radial-gradient(circle at 34% 20%, rgba(255, 255, 255, .5), transparent 32%),
-    linear-gradient(145deg, #5ce4ff, #477ce8 58%, #7258dd);
-  box-shadow:
-    0 17px 35px rgba(44, 155, 224, .42),
-    0 0 0 6px rgba(var(--accent-rgb), .075),
-    inset 0 2px 0 rgba(255, 255, 255, .45);
-  font-size: 31px;
-  font-weight: 350;
-  text-shadow: 0 3px 7px rgba(17, 69, 135, .35);
-}
-
-.tab-add-btn::after {
-  content: "";
-  position: absolute;
-  inset: 4px 11px auto;
-  height: 12px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .24), transparent);
-}
-
-.tab-add-btn .cf-icon3d {
-  position: relative;
-  z-index: 1;
-  width: 47px;
-  height: 47px;
-  filter: drop-shadow(0 7px 8px rgba(16, 55, 119, .28));
-}
-
-.tab-add:hover .tab-add-btn {
-  transform: translateY(-3px) scale(1.04);
-  box-shadow:
-    0 21px 42px rgba(44, 155, 224, .49),
-    0 0 0 7px rgba(var(--accent-rgb), .09),
-    inset 0 2px 0 rgba(255, 255, 255, .5);
-}
+/* L'onglet d'ajout est un onglet comme les autres : plus de pastille bleue ni
+   d'icone agrandie, il utilise .tab / .tab-ico au meme format que ses voisins. */
 
 /* Boutons côte à côte : autoriser le rétrécissement (min-width:auto sur un
    flex item empêchait la paire Sauvegarder/Restaurer de tenir dans la carte). */
@@ -1349,15 +1299,6 @@ button:not(:disabled):active {
   .tab .tab-ico .cf-icon3d {
     width: 29px;
     height: 29px;
-  }
-
-  .tab-add {
-    flex-basis: 54px;
-  }
-
-  .tab-add-btn {
-    width: 54px;
-    height: 54px;
   }
 
   .chart-wrap {
