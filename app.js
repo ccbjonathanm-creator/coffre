@@ -7,7 +7,7 @@
    ============================================================ */
 
 // ---------------- Constantes ----------------
-const APP_VERSION = 'v39';
+const APP_VERSION = 'v40';
 const PIN_LENGTH = 4;
 const LS = {
   salt: 'coffre.salt', data: 'coffre.data', meta: 'coffre.meta', guard: 'coffre.guard',
@@ -1227,7 +1227,7 @@ function viewDashboard() {
         const jour = new Date(r.occDate + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
         const passe = r.occDate <= todayISO();
         return `<div class="tx-item" data-recpay="${r.id}" data-recdate="${r.occDate}" style="margin-bottom:6px">
-          <div class="tx-ico">${iconImg(c.id)}</div>
+          <div class="tx-ico">${iconImg(txIconSlug({ icon: r.icon, note: r.note, category: c.id }))}</div>
           <div class="tx-main"><div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
           <div class="tx-note">${passe ? 'à enregistrer' : 'prévu'} · ${jour} · touche pour enregistrer</div></div>
           <div class="tx-amt ${cls}">${sign}${euro(r.amount)}</div>
@@ -1539,7 +1539,7 @@ function viewAbos() {
     return `
       <div class="card abo-card">
         <div class="abo-top">
-          <div class="tx-ico">${iconImg(c.id)}</div>
+          <div class="tx-ico">${iconImg(txIconSlug({ note: a.marchand, category: c.id }))}</div>
           <div style="flex:1;min-width:0">
             <div class="abo-name"><span class="abo-name-txt">${escapeHtml(a.marchand)}</span>${badge}${manTag}</div>
             <div class="muted" style="font-size:12px">${sub}</div>
@@ -1898,7 +1898,7 @@ function recurringListHtml() {
       ? `tous les ${WEEKDAYS[Number.isInteger(r.weekday) ? r.weekday : 0]}s`
       : `le ${r.day} de chaque mois`;
     return `<div class="tx-item" data-recur="${r.id}" style="margin-bottom:8px">
-      <div class="tx-ico">${iconImg(c.id)}</div>
+      <div class="tx-ico">${iconImg(txIconSlug({ icon: r.icon, note: r.note, category: c.id }))}</div>
       <div class="tx-main">
         <div class="tx-cat">${escapeHtml(r.note || c.name)}</div>
         <div class="tx-note">${quand} · ${c.name}</div>
@@ -2789,7 +2789,7 @@ function renderImportSheet() {
     const sign = p.type === 'expense' ? '-' : '+';
     const d = p.date.slice(8, 10) + '/' + p.date.slice(5, 7);
     return `<div class="tx-item" style="margin-bottom:8px">
-      <div class="tx-ico">${iconImg(c.id)}</div>
+      <div class="tx-ico">${iconImg(txIconSlug({ icon: p.icon, note: p.note, category: c.id }))}</div>
       <div class="tx-main"><div class="tx-cat" style="font-size:13px">${escapeHtml(p.note || c.name)}</div>
       <div class="tx-note">${d} · ${c.name}</div></div>
       <div class="tx-amt ${cls}">${sign}${euro(p.amount)}</div>
