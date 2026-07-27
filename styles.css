@@ -3,9 +3,6 @@
    ============================================================ */
 
 :root {
-  /* Sentinelle lue par garde-style.js : si cette variable est absente, c'est que la
-     feuille de style n'a pas été appliquée et que l'appli s'afficherait en vrac. */
-  --coffre-styles: chargee;
   --bg: #0b0f1a;
   --bg-soft: #121828;
   --card: #161d31;
