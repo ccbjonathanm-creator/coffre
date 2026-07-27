@@ -70,8 +70,25 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
   var saf = ua.match(/Version\/([\d.]+)/);
   ligne('Version Safari', saf ? saf[1] : 'inconnue');
   ligne('Largeur écran', window.innerWidth + ' px');
-  ligne('Mode', window.matchMedia('(display-mode: standalone)').matches
-        ? 'application installée' : 'onglet Safari');
+
+  // Navigateur intégré à une autre application (Snapchat, Instagram, Facebook...).
+  // Le rendu et les fonctions y different de Safari, et un diagnostic fait depuis
+  // l'un d'eux ne dit rien de ce qui se passe dans Safari.
+  var integres = [
+    ['Snapchat', /Snapchat/i], ['Instagram', /Instagram/i], ['Facebook', /FBAN|FBAV|FB_IAB/i],
+    ['Messenger', /Messenger/i], ['TikTok', /BytedanceWebview|TikTok|musical_ly/i],
+    ['LinkedIn', /LinkedIn/i], ['Pinterest', /Pinterest/i], ['X (Twitter)', /Twitter/i],
+    ['WhatsApp', /WhatsApp/i], ['Gmail', /GSA\//i]
+  ];
+  var integre = null;
+  for (var k = 0; k < integres.length; k++) {
+    if (integres[k][1].test(ua)) { integre = integres[k][0]; break; }
+  }
+  var installee = window.matchMedia('(display-mode: standalone)').matches
+                  || window.navigator.standalone === true;
+  ligne('Où tu es', integre ? ('navigateur intégré à ' + integre)
+        : (installee ? 'application installée' : 'navigateur normal'),
+        integre ? 'non' : 'oui');
   bloc(ua);
 
   // ---- 2. Ce que le navigateur sait faire ---------------------------------
@@ -116,11 +133,67 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
       ligne('C\'est en fait du HTML', estDuHtml ? 'OUI (defaut trouve)' : 'non',
             estDuHtml ? 'non' : 'oui');
       bloc('Debut du fichier recu :\n' + t.slice(0, 150));
-      conclure(nbRegles, estDuCss, estDuHtml);
+      testerMiseEnPage(function (mep) { conclure(nbRegles, estDuCss, estDuHtml, mep); });
     }).catch(function (e) {
       ligne('Téléchargement', 'ECHEC : ' + e, 'non');
-      conclure(nbRegles, false, false);
+      testerMiseEnPage(function (mep) { conclure(nbRegles, false, false, mep); });
     });
+  }
+
+  // ---- 3 bis. La mise en page tient-elle vraiment ? ----------------------
+  // On reconstruit à part le clavier du code et la barre du bas, puis on mesure ce
+  // que le navigateur en fait. C'est le symptôme exact décrit : touches décalées et
+  // barre du bas dans le contenu. On ne lance PAS l'application, donc rien n'est
+  // écrit et aucune donnée n'est touchée.
+  function testerMiseEnPage(fini) {
+    titre('Mise en page réelle');
+    var base = location.href.replace(/[^/]*$/, '');
+    var t = Date.now();
+    var page =
+      '<!DOCTYPE html><html><head>' +
+      '<link rel="stylesheet" href="' + base + 'styles.css?m=' + t + '">' +
+      '<link rel="stylesheet" href="' + base + 'premium.css?m=' + t + '">' +
+      '</head><body>' +
+      '<div class="keypad"><button>1</button><button>2</button><button>3</button>' +
+      '<button>4</button><button>5</button><button>6</button></div>' +
+      '<nav class="tabbar"><button class="tab">A</button></nav>' +
+      '<div class="hidden" id="cache">invisible</div>' +
+      '</body></html>';
+
+    var f = document.createElement('iframe');
+    f.setAttribute('style', 'position:absolute;left:-9999px;top:0;width:390px;height:800px;border:0');
+    f.srcdoc = page;
+
+    var termine = false;
+    function mesurer() {
+      if (termine) return;
+      termine = true;
+      var res = { clavier: '?', barre: '?', masque: '?', ok: false };
+      try {
+        var d = f.contentDocument, w = f.contentWindow;
+        var kp = d.querySelector('.keypad'), tb = d.querySelector('.tabbar'), hd = d.querySelector('#cache');
+        var ckp = w.getComputedStyle(kp), ctb = w.getComputedStyle(tb), chd = w.getComputedStyle(hd);
+        // Hors grille, gridTemplateColumns vaut « none » : afficher « 1 colonne »
+        // dans ce cas serait trompeur, on ne le montre que si la grille existe.
+        var brut = ckp.gridTemplateColumns || '';
+        var colonnes = (brut === 'none' || !brut) ? 0 : brut.split(' ').filter(Boolean).length;
+        res.clavier = ckp.display + (colonnes ? ', ' + colonnes + ' colonne' + (colonnes > 1 ? 's' : '') : '');
+        res.barre = ctb.position;
+        res.masque = chd.display;
+        res.ok = (ckp.display === 'grid' && colonnes === 3
+                  && ctb.position === 'fixed' && chd.display === 'none');
+      } catch (e) { res.clavier = 'illisible : ' + e; }
+
+      ligne('Clavier du code', res.clavier, res.clavier.indexOf('grid') === 0 ? 'oui' : 'non');
+      ligne('Barre du bas', res.barre, res.barre === 'fixed' ? 'oui' : 'non');
+      ligne('Elements masques', res.masque, res.masque === 'none' ? 'oui' : 'non');
+      f.parentNode && f.parentNode.removeChild(f);
+      fini(res);
+    }
+    f.onload = function () { setTimeout(mesurer, 350); };
+    // Filet : si l'iframe ne signale jamais son chargement, on mesure quand même.
+    setTimeout(mesurer, 3000);
+    document.body.appendChild(f);
   }
 
   lien.onload = lien.onerror = function () {
@@ -147,7 +220,7 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
   }
 
   // ---- Verdict ------------------------------------------------------------
-  function conclure(nbRegles, estDuCss, estDuHtml) {
+  function conclure(nbRegles, estDuCss, estDuHtml, mep) {
     var v = document.getElementById('verdict');
     var txt, classe;
     if (estDuHtml) {
@@ -162,9 +235,18 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
     } else if (manquantes.length) {
       txt = 'TROUVE : ce navigateur ne gere pas ' + manquantes.join(', ') + '.';
       classe = 'ko';
+    } else if (mep && !mep.ok) {
+      txt = 'TROUVE : la mise en page ne tient pas (clavier ' + mep.clavier +
+            ', barre ' + mep.barre + ', masques ' + mep.masque + ').';
+      classe = 'ko';
     } else {
-      txt = 'Tout est normal ici : ' + nbRegles + ' regles chargees, aucune fonction manquante.';
+      txt = 'Tout est normal ici : ' + nbRegles + ' regles chargees, mise en page correcte.';
       classe = 'ok';
+      if (integre) {
+        txt += ' MAIS tu es dans le navigateur integre a ' + integre +
+               ', pas dans Safari : refais ce test dans Safari, la ou le probleme apparait.';
+        classe = 'attente';
+      }
     }
     v.className = 'verdict ' + classe;
     v.textContent = txt;
