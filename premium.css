@@ -5,6 +5,8 @@
    ============================================================ */
 
 :root {
+  /* Sentinelle lue par garde-style.js, voir styles.css. */
+  --coffre-premium: chargee;
   --bg: #030711;
   --bg-soft: #07101d;
   --card: rgba(13, 25, 43, .82);

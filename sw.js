@@ -1,11 +1,12 @@
 /* Coffre — service worker : met l'app en cache pour un fonctionnement hors-ligne. */
-const CACHE = 'coffre-premium-v42';
+const CACHE = 'coffre-premium-v43';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './premium.css',
   './icons-premium.js',
+  './garde-style.js',
   './app.js',
   './vendor/xlsx.full.min.js',
   './vendor/pdf.min.js',
@@ -75,8 +76,23 @@ const ASSETS = [
   './icons/premium3d/wrench.webp',
 ];
 
+// Le noyau doit être complet pour que l'appli fonctionne hors-ligne ; les icônes sont
+// mises en cache au mieux. Sinon, une seule icône manquante sur un réseau faible faisait
+// échouer addAll() en entier et le service worker ne s'installait pas du tout.
+const NOYAU = [
+  './', './index.html', './styles.css', './premium.css', './icons-premium.js',
+  './garde-style.js', './app.js',
+];
+const RESTE = ASSETS.filter((a) => !NOYAU.includes(a));
+
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE).then((c) =>
+      c.addAll(NOYAU).then(() =>
+        Promise.all(RESTE.map((a) => c.add(a).catch(() => {})))
+      )
+    )
+  );
 });
 
 // Le bouton "Mettre à jour" de l'appli demande au nouveau worker de prendre la main.
@@ -103,17 +119,29 @@ self.addEventListener('fetch', (e) => {
     // resservir un ancien app.js et bloquer la mise à jour. Le cache SW sert de secours hors-ligne.
     e.respondWith(
       fetch(e.request, { cache: 'no-store' }).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        // Ne jamais mettre en cache une réponse en erreur : elle resservirait indéfiniment.
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        }
         return res;
-      }).catch(() => caches.match(e.request).then((hit) => hit || caches.match('./index.html')))
+      }).catch(() => caches.match(e.request).then((hit) => {
+        if (hit) return hit;
+        // Le repli sur index.html ne vaut QUE pour une navigation. Le servir à la place
+        // d'un CSS ou d'un JS donnait du HTML au navigateur, qui l'ignorait en silence :
+        // l'appli s'affichait alors sans sa mise en page (clavier et barre du bas décalés).
+        if (e.request.mode === 'navigate') return caches.match('./index.html');
+        return Response.error();
+      }))
     );
   } else {
     // Cache d'abord pour le reste (SheetJS, icônes) : lourd et figé.
     e.respondWith(
       caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        }
         return res;
       }))
     );

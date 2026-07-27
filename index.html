@@ -16,6 +16,9 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="premium.css" />
+  <!-- Placé après les feuilles : à ce point le navigateur a fini de les résoudre,
+       le garde-fou lit donc leur état définitif et peut réparer avant l'affichage. -->
+  <script src="garde-style.js"></script>
 </head>
 <body>
 
