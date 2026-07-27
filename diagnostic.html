@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Coffre — Diagnostic d'affichage</title>
+<!-- Page volontairement autonome : aucun fichier externe, aucune règle de sécurité
+     restrictive. Elle doit fonctionner même quand l'application, elle, ne s'affiche pas.
+     Elle ne lit aucune donnée personnelle et n'envoie rien nulle part. -->
+<style>
+  body { margin:0; padding:18px; background:#0b0f1a; color:#eef2ff; line-height:1.5;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; font-size:15px; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#93a0c2; font-size:13px; margin:0 0 18px; }
+  .verdict { padding:14px; border-radius:12px; font-weight:700; margin-bottom:18px; font-size:16px; }
+  .ok { background:#0d3a2c; color:#5ce7b0; }
+  .ko { background:#3d1620; color:#ff8fa2; }
+  .attente { background:#1c2542; color:#93a0c2; }
+  .ligne { display:flex; justify-content:space-between; gap:12px; padding:9px 0;
+           border-bottom:1px solid #26304d; font-size:14px; }
+  .cle { color:#93a0c2; flex:0 0 auto; }
+  .val { text-align:right; word-break:break-word; font-weight:600; }
+  .val.non { color:#ff8fa2; }
+  .val.oui { color:#5ce7b0; }
+  pre { background:#161d31; padding:11px; border-radius:9px; overflow-x:auto;
+        font-size:11px; color:#c7d2f0; white-space:pre-wrap; word-break:break-all; }
+  button { width:100%; padding:15px; margin-top:16px; font-size:16px; font-weight:700;
+           border:0; border-radius:12px; background:#6d7cff; color:#fff; }
+  h2 { font-size:14px; color:#93a0c2; margin:22px 0 6px; text-transform:uppercase; letter-spacing:.5px; }
+</style>
+</head>
+<body>
+
+<h1>Diagnostic d'affichage</h1>
+<p class="sub">Cette page vérifie pourquoi Coffre ne s'affiche pas correctement.
+Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
+
+<div id="verdict" class="verdict attente">Analyse en cours…</div>
+<div id="resultats"></div>
+
+<button id="copier" type="button">Copier le rapport</button>
+
+<script>
+(function () {
+  var R = [];   // rapport texte, pour le bouton Copier
+  var zone = document.getElementById('resultats');
+
+  function titre(t) {
+    var h = document.createElement('h2'); h.textContent = t; zone.appendChild(h);
+    R.push(''); R.push('--- ' + t + ' ---');
+  }
+  function ligne(cle, val, etat) {
+    var d = document.createElement('div'); d.className = 'ligne';
+    var a = document.createElement('span'); a.className = 'cle'; a.textContent = cle;
+    var b = document.createElement('span'); b.className = 'val' + (etat ? ' ' + etat : '');
+    b.textContent = val;
+    d.appendChild(a); d.appendChild(b); zone.appendChild(d);
+    R.push(cle + ' : ' + val);
+  }
+  function bloc(texte) {
+    var p = document.createElement('pre'); p.textContent = texte; zone.appendChild(p);
+    R.push(texte);
+  }
+
+  // ---- 1. L'appareil et le navigateur -------------------------------------
+  titre('Appareil');
+  var ua = navigator.userAgent;
+  var ios = ua.match(/OS (\d+)[_.](\d+)/);
+  ligne('Version iOS', ios ? ios[1] + '.' + ios[2] : 'non-iOS ou inconnue');
+  var saf = ua.match(/Version\/([\d.]+)/);
+  ligne('Version Safari', saf ? saf[1] : 'inconnue');
+  ligne('Largeur écran', window.innerWidth + ' px');
+  ligne('Mode', window.matchMedia('(display-mode: standalone)').matches
+        ? 'application installée' : 'onglet Safari');
+  bloc(ua);
+
+  // ---- 2. Ce que le navigateur sait faire ---------------------------------
+  titre('Fonctions nécessaires');
+  var fonctions = [
+    ['Grilles (clavier du code)', 'display', 'grid'],
+    ['Espacement (gap)', 'gap', '10px'],
+    ['Barre fixée en bas', 'position', 'fixed'],
+    ['Couleurs color-mix', 'color', 'color-mix(in srgb, red 50%, blue)'],
+    ['Hauteur 100dvh', 'height', '100dvh']
+  ];
+  var manquantes = [];
+  for (var i = 0; i < fonctions.length; i++) {
+    var f = fonctions[i], sup = false;
+    try { sup = window.CSS && CSS.supports(f[1], f[2]); } catch (e) { sup = false; }
+    if (!sup) manquantes.push(f[0]);
+    ligne(f[0], sup ? 'oui' : 'NON', sup ? 'oui' : 'non');
+  }
+
+  // ---- 3. La feuille de style est-elle appliquée ? ------------------------
+  titre('Feuille de style');
+  var lien = document.createElement('link');
+  lien.rel = 'stylesheet';
+  lien.href = 'styles.css?diag=' + Date.now();
+
+  function suite(nbRegles) {
+    ligne('Règles chargées', nbRegles === null ? 'illisible' : String(nbRegles),
+          nbRegles ? 'oui' : 'non');
+
+    // ---- 4. Ce que le serveur renvoie vraiment pour styles.css ------------
+    titre('Fichier reçu');
+    fetch('styles.css?diag2=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+      ligne('Code HTTP', String(r.status), r.ok ? 'oui' : 'non');
+      var ct = r.headers.get('content-type') || 'absent';
+      ligne('Type de contenu', ct, ct.indexOf('css') !== -1 ? 'oui' : 'non');
+      return r.text();
+    }).then(function (t) {
+      ligne('Taille reçue', t.length + ' caractères');
+      var estDuCss = t.indexOf('.keypad') !== -1;
+      var estDuHtml = t.replace(/^\s+/, '').slice(0, 9).toLowerCase() === '<!doctype';
+      ligne('Contient bien le CSS', estDuCss ? 'oui' : 'NON', estDuCss ? 'oui' : 'non');
+      ligne('C\'est en fait du HTML', estDuHtml ? 'OUI (defaut trouve)' : 'non',
+            estDuHtml ? 'non' : 'oui');
+      bloc('Debut du fichier recu :\n' + t.slice(0, 150));
+      conclure(nbRegles, estDuCss, estDuHtml);
+    }).catch(function (e) {
+      ligne('Téléchargement', 'ECHEC : ' + e, 'non');
+      conclure(nbRegles, false, false);
+    });
+  }
+
+  lien.onload = lien.onerror = function () {
+    var n = null;
+    try { n = lien.sheet ? lien.sheet.cssRules.length : 0; } catch (e) { n = null; }
+    setTimeout(function () { suite(n); }, 0);
+  };
+  document.head.appendChild(lien);
+
+  // ---- 5. Le service worker et ses caches --------------------------------
+  titre('Mémoire de l\'application');
+  if ('serviceWorker' in navigator) {
+    ligne('Service worker actif', navigator.serviceWorker.controller ? 'oui' : 'non');
+    if (navigator.serviceWorker.controller) {
+      bloc(navigator.serviceWorker.controller.scriptURL);
+    }
+  } else {
+    ligne('Service worker', 'non géré');
+  }
+  if (window.caches && caches.keys) {
+    caches.keys().then(function (k) {
+      ligne('Caches enregistrés', k.length ? k.join(', ') : 'aucun');
+    });
+  }
+
+  // ---- Verdict ------------------------------------------------------------
+  function conclure(nbRegles, estDuCss, estDuHtml) {
+    var v = document.getElementById('verdict');
+    var txt, classe;
+    if (estDuHtml) {
+      txt = 'TROUVE : le serveur renvoie une page HTML au lieu de la feuille de style.';
+      classe = 'ko';
+    } else if (!estDuCss) {
+      txt = 'TROUVE : le fichier recu n\'est pas la bonne feuille de style.';
+      classe = 'ko';
+    } else if (!nbRegles) {
+      txt = 'TROUVE : le fichier arrive bien, mais le navigateur refuse de l\'appliquer.';
+      classe = 'ko';
+    } else if (manquantes.length) {
+      txt = 'TROUVE : ce navigateur ne gere pas ' + manquantes.join(', ') + '.';
+      classe = 'ko';
+    } else {
+      txt = 'Tout est normal ici : ' + nbRegles + ' regles chargees, aucune fonction manquante.';
+      classe = 'ok';
+    }
+    v.className = 'verdict ' + classe;
+    v.textContent = txt;
+    R.unshift('VERDICT : ' + txt);
+  }
+
+  document.getElementById('copier').addEventListener('click', function () {
+    var t = R.join('\n');
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(t).then(function () {
+        document.getElementById('copier').textContent = 'Rapport copié';
+      }).catch(function () { alert(t); });
+    } else { alert(t); }
+  });
+})();
+</script>
+</body>
+</html>
