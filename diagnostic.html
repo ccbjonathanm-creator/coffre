@@ -38,6 +38,10 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
 <div id="verdict" class="verdict attente">Analyse en cours…</div>
 <div id="resultats"></div>
 
+<button id="reparer" type="button" style="background:#c2410c">Vider la mémoire et recharger</button>
+<p class="sub" style="margin-top:8px">Ce bouton efface uniquement les fichiers gardés en mémoire
+par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.</p>
+
 <button id="copier" type="button">Copier le rapport</button>
 
 <script>
@@ -133,10 +137,14 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
       ligne('C\'est en fait du HTML', estDuHtml ? 'OUI (defaut trouve)' : 'non',
             estDuHtml ? 'non' : 'oui');
       bloc('Debut du fichier recu :\n' + t.slice(0, 150));
-      testerMiseEnPage(function (mep) { conclure(nbRegles, estDuCss, estDuHtml, mep); });
+      testerMiseEnPage(function (mep) {
+        testerVersions(function (ecarts) { conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts); });
+      });
     }).catch(function (e) {
       ligne('Téléchargement', 'ECHEC : ' + e, 'non');
-      testerMiseEnPage(function (mep) { conclure(nbRegles, false, false, mep); });
+      testerMiseEnPage(function (mep) {
+        testerVersions(function (ecarts) { conclure(nbRegles, false, false, mep, ecarts); });
+      });
     });
   }
 
@@ -196,6 +204,62 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
     document.body.appendChild(f);
   }
 
+  // ---- 3 ter. Versions des fichiers --------------------------------------
+  // L'appli peut avoir une feuille de style parfaite et rester cassee si un SEUL
+  // fichier servi est perime : un ancien app.js avec le nouveau CSS, par exemple,
+  // laisse des icones au mauvais endroit. On compare donc, fichier par fichier, ce
+  // que le service worker garde en memoire avec ce que le serveur renvoie vraiment.
+  function testerVersions(fini) {
+    titre('Versions des fichiers');
+    var noms = ['index.html', 'styles.css', 'premium.css', 'app.js',
+                'icons-premium.js', 'garde-style.js'];
+    var base = location.href.replace(/[^/]*$/, '');
+
+    // Empreinte courte, calculee sur place : deux contenus differents la changent.
+    function empreinte(t) {
+      var h = 5381;
+      for (var i = 0; i < t.length; i++) { h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; }
+      return t.length + ':' + h.toString(16);
+    }
+
+    if (!window.caches || !caches.keys) {
+      ligne('Comparaison', 'impossible (pas de cache sur ce navigateur)');
+      return fini([]);
+    }
+
+    var ecarts = [];
+    caches.keys().then(function (cles) {
+      if (!cles.length) { ligne('Cache', 'aucun'); return fini([]); }
+      return caches.open(cles[0]).then(function (c) {
+        var restant = noms.length;
+        noms.forEach(function (nom) {
+          var url = base + nom;
+          Promise.all([
+            c.match(url).then(function (r) { return r ? r.text() : null; }).catch(function () { return null; }),
+            fetch(url + '?v=' + Date.now(), { cache: 'no-store' })
+              .then(function (r) { return r.ok ? r.text() : null; }).catch(function () { return null; })
+          ]).then(function (deux) {
+            var enCache = deux[0], surServeur = deux[1];
+            var etat, classe;
+            if (enCache === null) { etat = 'pas en memoire'; classe = ''; }
+            else if (surServeur === null) { etat = 'serveur injoignable'; classe = 'non'; }
+            else if (empreinte(enCache) === empreinte(surServeur)) { etat = 'a jour'; classe = 'oui'; }
+            else {
+              etat = 'PERIME (' + enCache.length + ' au lieu de ' + surServeur.length + ' caracteres)';
+              classe = 'non';
+              ecarts.push(nom);
+            }
+            ligne(nom, etat, classe);
+            if (--restant === 0) fini(ecarts);
+          });
+        });
+      });
+    }).catch(function (e) {
+      ligne('Comparaison', 'echec : ' + e, 'non');
+      fini([]);
+    });
+  }
+
   lien.onload = lien.onerror = function () {
     var n = null;
     try { n = lien.sheet ? lien.sheet.cssRules.length : 0; } catch (e) { n = null; }
@@ -220,10 +284,14 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
   }
 
   // ---- Verdict ------------------------------------------------------------
-  function conclure(nbRegles, estDuCss, estDuHtml, mep) {
+  function conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts) {
     var v = document.getElementById('verdict');
     var txt, classe;
-    if (estDuHtml) {
+    if (ecarts && ecarts.length) {
+      txt = 'TROUVE : l\'appli garde en memoire une ancienne version de ' +
+            ecarts.join(', ') + '. C\'est ce melange qui casse l\'affichage.';
+      classe = 'ko';
+    } else if (estDuHtml) {
       txt = 'TROUVE : le serveur renvoie une page HTML au lieu de la feuille de style.';
       classe = 'ko';
     } else if (!estDuCss) {
@@ -252,6 +320,31 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
     v.textContent = txt;
     R.unshift('VERDICT : ' + txt);
   }
+
+  // Remise a neuf : on supprime les fichiers gardes en memoire et le service worker,
+  // puis on recharge l'appli. On ne touche NI au stockage local NI a la base de
+  // donnees : les operations, le code et la licence sont conserves.
+  document.getElementById('reparer').addEventListener('click', function () {
+    var b = this;
+    b.disabled = true;
+    b.textContent = 'Nettoyage en cours…';
+    var taches = [];
+    if (window.caches && caches.keys) {
+      taches.push(caches.keys().then(function (k) {
+        return Promise.all(k.map(function (n) { return caches.delete(n); }));
+      }));
+    }
+    if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+      taches.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+      }));
+    }
+    Promise.all(taches).catch(function () {}).then(function () {
+      b.textContent = 'Nettoyé, rechargement…';
+      var base = location.href.replace(/[^/]*$/, '');
+      setTimeout(function () { location.replace(base + '?frais=' + Date.now()); }, 600);
+    });
+  });
 
   document.getElementById('copier').addEventListener('click', function () {
     var t = R.join('\n');
