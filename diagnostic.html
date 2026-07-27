@@ -73,7 +73,27 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
   ligne('Version iOS', ios ? ios[1] + '.' + ios[2] : 'non-iOS ou inconnue');
   var saf = ua.match(/Version\/([\d.]+)/);
   ligne('Version Safari', saf ? saf[1] : 'inconnue');
-  ligne('Largeur écran', window.innerWidth + ' px');
+  // Zoom de page de Safari : il se regle PAR SITE (menu aA) et n'est pas efface par
+  // la suppression des donnees du site, puisque c'est un reglage et non une donnee.
+  // C'est la seule chose qui survit a une reinstallation complete.
+  var largeurEcran = (window.screen && screen.width) ? screen.width : 0;
+  var zoom = largeurEcran ? Math.round((largeurEcran / window.innerWidth) * 100) : 0;
+  ligne('Largeur affichée', window.innerWidth + ' px');
+  ligne('Largeur de l\'écran', largeurEcran ? largeurEcran + ' px' : 'inconnue');
+  ligne('Zoom de la page', zoom ? zoom + ' %' : 'inconnu',
+        (zoom >= 95 && zoom <= 105) ? 'oui' : 'non');
+  var pincement = (window.visualViewport && visualViewport.scale) ? visualViewport.scale : 1;
+  ligne('Zoom au doigt', Math.round(pincement * 100) + ' %', pincement === 1 ? 'oui' : 'non');
+
+  // Texte agrandi automatiquement par iOS : le CSS ne fixe pas text-size-adjust,
+  // donc on mesure la taille reellement obtenue pour un texte declare a 16 px.
+  var sonde = document.createElement('div');
+  sonde.setAttribute('style', 'position:absolute;left:-9999px;font-size:16px;line-height:1');
+  sonde.textContent = 'M';
+  document.body.appendChild(sonde);
+  var taille = Math.round(parseFloat(getComputedStyle(sonde).fontSize));
+  sonde.parentNode.removeChild(sonde);
+  ligne('Texte de 16 px rendu à', taille + ' px', taille === 16 ? 'oui' : 'non');
 
   // Navigateur intégré à une autre application (Snapchat, Instagram, Facebook...).
   // Le rendu et les fonctions y different de Safari, et un diagnostic fait depuis
@@ -302,6 +322,18 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
       classe = 'ko';
     } else if (manquantes.length) {
       txt = 'TROUVE : ce navigateur ne gere pas ' + manquantes.join(', ') + '.';
+      classe = 'ko';
+    } else if (zoom && (zoom < 95 || zoom > 105)) {
+      txt = 'TROUVE : le zoom de Safari pour ce site est a ' + zoom + ' % au lieu de 100 %. ' +
+            'Appuie sur « aA » a gauche de l\'adresse, puis remets le zoom a 100 %.';
+      classe = 'ko';
+    } else if (pincement !== 1) {
+      txt = 'TROUVE : la page est agrandie au doigt (' + Math.round(pincement * 100) + ' %). ' +
+            'Pince l\'ecran pour revenir a 100 %.';
+      classe = 'ko';
+    } else if (taille !== 16) {
+      txt = 'TROUVE : le texte est agrandi automatiquement (' + taille +
+            ' px au lieu de 16). C\'est un reglage d\'affichage du telephone.';
       classe = 'ko';
     } else if (mep && !mep.ok) {
       txt = 'TROUVE : la mise en page ne tient pas (clavier ' + mep.clavier +
