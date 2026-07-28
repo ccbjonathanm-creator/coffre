@@ -47,6 +47,15 @@ html, body {
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
 .hidden { display: none !important; }
 
+/* Taille de secours des icônes. Les fichiers image font 256 px et toutes leurs
+   tailles réelles sont définies dans premium.css. Si cette feuille n'est pas
+   appliquée, les icônes s'affichent donc à 256 px et recouvrent l'écran, alors
+   que le reste de la page reste en place : c'est le défaut rencontré chez un
+   client. Ces trois sélecteurs ne portent qu'une seule classe, donc toutes les
+   règles de premium.css, qui en portent au moins deux, continuent de l'emporter.
+   Ils ne changent rien à l'affichage normal et servent uniquement de filet. */
+.cf-icon3d, .ui-icon3d, .ic3d { width: 28px; height: 28px; }
+
 /* ---------------- Écran de verrouillage ---------------- */
 .lock {
   position: fixed; inset: 0; z-index: 50;
