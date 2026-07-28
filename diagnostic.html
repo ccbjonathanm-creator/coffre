@@ -127,8 +127,10 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
   var zoom = largeurEcran ? Math.round((largeurEcran / window.innerWidth) * 100) : 0;
   ligne('Largeur affichée', window.innerWidth + ' px');
   ligne('Largeur de l\'écran', largeurEcran ? largeurEcran + ' px' : 'inconnue');
-  ligne('Zoom de la page', zoom ? zoom + ' %' : 'inconnu',
-        (zoom >= 95 && zoom <= 105) ? 'oui' : 'non');
+  // Indication seulement, jamais un verdict : sur iPhone recent, screen.width ne
+  // correspond pas toujours a la largeur reelle, ce qui faisait annoncer a tort
+  // un zoom de 94 % sur un Safari verifie a 100 %.
+  ligne('Rapport des largeurs', zoom ? zoom + ' % (indicatif)' : 'inconnu');
   var pincement = (window.visualViewport && visualViewport.scale) ? visualViewport.scale : 1;
   ligne('Zoom au doigt', Math.round(pincement * 100) + ' %', pincement === 1 ? 'oui' : 'non');
 
@@ -205,12 +207,16 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
             estDuHtml ? 'non' : 'oui');
       bloc('Debut du fichier recu :\n' + t.slice(0, 150));
       testerMiseEnPage(function (mep) {
-        testerVersions(function (ecarts) { conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts); });
+        testerVersions(function (ecarts) {
+          testerAppli(function (appli) { conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts, appli); });
+        });
       });
     }).catch(function (e) {
       ligne('Téléchargement', 'ECHEC : ' + e, 'non');
       testerMiseEnPage(function (mep) {
-        testerVersions(function (ecarts) { conclure(nbRegles, false, false, mep, ecarts); });
+        testerVersions(function (ecarts) {
+          testerAppli(function (appli) { conclure(nbRegles, false, false, mep, ecarts, appli); });
+        });
       });
     });
   }
@@ -286,6 +292,57 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
     f.onload = function () { setTimeout(mesurer, 350); };
     // Filet : si l'iframe ne signale jamais son chargement, on mesure quand même.
     setTimeout(mesurer, 3000);
+    document.body.appendChild(f);
+  }
+
+  // ---- 3 quater. L'application elle-meme ---------------------------------
+  // Tout ce qui precede teste des fichiers. Or les icones ne sont pas ecrites dans
+  // la page : un script les injecte au demarrage dans des emplacements vides. Si ce
+  // script ne va pas au bout, les emplacements restent vides et les icones sont
+  // invisibles, sans que rien d'autre ne bouge. On ouvre donc la vraie application
+  // et on compte les emplacements reellement remplis, en notant ses erreurs.
+  function testerAppli(fini) {
+    titre('Application');
+    var f = document.createElement('iframe');
+    f.setAttribute('style', 'position:absolute;left:-9999px;top:0;width:390px;height:800px;border:0');
+    f.src = location.href.replace(/[^/]*$/, '') + 'index.html?sonde=' + Date.now();
+
+    var erreurs = [];
+    var termine = false;
+
+    function mesurer() {
+      if (termine) return;
+      termine = true;
+      var res = { emplacements: 0, remplis: 0, erreurs: erreurs.slice(0, 3) };
+      try {
+        var d = f.contentDocument;
+        var cases = d.querySelectorAll('[data-cf-icon]');
+        res.emplacements = cases.length;
+        for (var i = 0; i < cases.length; i++) {
+          if (cases[i].querySelector('img')) res.remplis++;
+        }
+      } catch (e) { res.erreurs.push('lecture impossible : ' + e); }
+
+      ligne('Emplacements d\'icones', String(res.emplacements));
+      ligne('Icones posees', res.remplis + ' sur ' + res.emplacements,
+            (res.emplacements && res.remplis === res.emplacements) ? 'oui' : 'non');
+      ligne('Erreurs du code', res.erreurs.length ? String(res.erreurs.length) : 'aucune',
+            res.erreurs.length ? 'non' : 'oui');
+      if (res.erreurs.length) bloc(res.erreurs.join('\n'));
+      f.parentNode && f.parentNode.removeChild(f);
+      fini(res);
+    }
+
+    f.onload = function () {
+      try {
+        // On ecoute les erreurs de l'application, invisibles autrement.
+        f.contentWindow.addEventListener('error', function (ev) {
+          erreurs.push((ev.message || 'erreur') + ' — ' + (ev.filename || '') + ':' + (ev.lineno || ''));
+        });
+      } catch (e) { /* lecture refusee, on mesurera quand meme */ }
+      setTimeout(mesurer, 2500);
+    };
+    setTimeout(mesurer, 6000);
     document.body.appendChild(f);
   }
 
@@ -369,7 +426,7 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
   }
 
   // ---- Verdict ------------------------------------------------------------
-  function conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts) {
+  function conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts, appli) {
     var v = document.getElementById('verdict');
     var txt, classe;
 
@@ -381,7 +438,18 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
     var iconesKo = (echouees > 0 && echouees < VITRINE.length && referenceOk);
     var toutKo = (chargees === 0);
 
-    if (toutKo) {
+    if (appli && appli.emplacements && appli.remplis === 0) {
+      txt = 'TROUVE : dans l\'application, aucune icone n\'est posee (' + appli.emplacements +
+            ' emplacements restes vides). Le code qui les place ne s\'execute pas.';
+      classe = 'ko';
+    } else if (appli && appli.emplacements && appli.remplis < appli.emplacements) {
+      txt = 'TROUVE : dans l\'application, seules ' + appli.remplis + ' icones sur ' +
+            appli.emplacements + ' sont posees.';
+      classe = 'ko';
+    } else if (appli && appli.erreurs && appli.erreurs.length) {
+      txt = 'TROUVE : l\'application declenche une erreur au demarrage. ' + appli.erreurs[0];
+      classe = 'ko';
+    } else if (toutKo) {
       txt = 'TROUVE : aucune image ne s\'affiche sur cet appareil, meme celle integree ' +
             'a cette page. Le probleme ne vient pas de l\'application.';
       classe = 'ko';
@@ -404,10 +472,6 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
       classe = 'ko';
     } else if (manquantes.length) {
       txt = 'TROUVE : ce navigateur ne gere pas ' + manquantes.join(', ') + '.';
-      classe = 'ko';
-    } else if (zoom && (zoom < 95 || zoom > 105)) {
-      txt = 'TROUVE : le zoom de Safari pour ce site est a ' + zoom + ' % au lieu de 100 %. ' +
-            'Appuie sur « aA » a gauche de l\'adresse, puis remets le zoom a 100 %.';
       classe = 'ko';
     } else if (pincement !== 1) {
       txt = 'TROUVE : la page est agrandie au doigt (' + Math.round(pincement * 100) + ' %). ' +
