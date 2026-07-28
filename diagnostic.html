@@ -184,7 +184,12 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
       '</head><body>' +
       '<div class="keypad"><button>1</button><button>2</button><button>3</button>' +
       '<button>4</button><button>5</button><button>6</button></div>' +
-      '<nav class="tabbar"><button class="tab">A</button></nav>' +
+      // La barre du bas avec une vraie icone : c'est premium.css, et lui seul, qui
+      // ramene l'image de 256 px a 31 px. Sans lui, l'icone s'affiche a sa taille
+      // d'origine et recouvre tout. styles.css ne mentionne jamais cf-icon3d.
+      '<nav class="tabbar"><button class="tab"><span class="tab-ico">' +
+      '<img id="ico" class="cf-icon3d" src="' + base + 'icons/premium3d/house.webp" alt="">' +
+      '</span><span class="tab-lbl">Accueil</span></button></nav>' +
       '<div class="hidden" id="cache">invisible</div>' +
       '</body></html>';
 
@@ -196,11 +201,22 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
     function mesurer() {
       if (termine) return;
       termine = true;
-      var res = { clavier: '?', barre: '?', masque: '?', ok: false };
+      var res = { clavier: '?', barre: '?', masque: '?', icone: '?', image: '?', ok: false, iconeOk: false };
       try {
         var d = f.contentDocument, w = f.contentWindow;
         var kp = d.querySelector('.keypad'), tb = d.querySelector('.tabbar'), hd = d.querySelector('#cache');
         var ckp = w.getComputedStyle(kp), ctb = w.getComputedStyle(tb), chd = w.getComputedStyle(hd);
+
+        // L'icone de la barre : sa taille de 31 px vient UNIQUEMENT de premium.css.
+        // Si premium.css n'est pas applique, l'image reste a sa taille d'origine,
+        // 256 px, et recouvre tout. C'est le defaut vu sur la capture du client.
+        var im = d.getElementById('ico');
+        var largeurRendue = Math.round(im.getBoundingClientRect().width);
+        res.icone = largeurRendue + ' px';
+        res.iconeOk = (largeurRendue > 20 && largeurRendue <= 45);
+        // naturalWidth a 0 = l'image n'a pas pu etre chargee ou decodee du tout.
+        res.image = im.naturalWidth ? ('chargee, ' + im.naturalWidth + ' px d\'origine')
+                                    : 'PAS CHARGEE';
         // Hors grille, gridTemplateColumns vaut « none » : afficher « 1 colonne »
         // dans ce cas serait trompeur, on ne le montre que si la grille existe.
         var brut = ckp.gridTemplateColumns || '';
@@ -215,6 +231,8 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
       ligne('Clavier du code', res.clavier, res.clavier.indexOf('grid') === 0 ? 'oui' : 'non');
       ligne('Barre du bas', res.barre, res.barre === 'fixed' ? 'oui' : 'non');
       ligne('Elements masques', res.masque, res.masque === 'none' ? 'oui' : 'non');
+      ligne('Image de l\'icone', res.image, res.image === 'PAS CHARGEE' ? 'non' : 'oui');
+      ligne('Taille de l\'icone', res.icone + ' (attendu 31)', res.iconeOk ? 'oui' : 'non');
       f.parentNode && f.parentNode.removeChild(f);
       fini(res);
     }
@@ -334,6 +352,13 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
     } else if (taille !== 16) {
       txt = 'TROUVE : le texte est agrandi automatiquement (' + taille +
             ' px au lieu de 16). C\'est un reglage d\'affichage du telephone.';
+      classe = 'ko';
+    } else if (mep && mep.image === 'PAS CHARGEE') {
+      txt = 'TROUVE : les images des icones ne se chargent pas sur cet appareil.';
+      classe = 'ko';
+    } else if (mep && !mep.iconeOk) {
+      txt = 'TROUVE : les icones s\'affichent en ' + mep.icone + ' au lieu de 31 px. ' +
+            'La feuille premium.css n\'est pas appliquee, c\'est elle qui les redimensionne.';
       classe = 'ko';
     } else if (mep && !mep.ok) {
       txt = 'TROUVE : la mise en page ne tient pas (clavier ' + mep.clavier +
