@@ -36,6 +36,13 @@
 Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
 
 <div id="verdict" class="verdict attente">Analyse en cours…</div>
+
+<!-- Test a l'oeil, sans rien lire : trois icones de l'appli et une image de
+     reference incluse dans la page, qui ne demande aucun telechargement. -->
+<h2 style="margin-top:0">Vois-tu ces 4 images ?</h2>
+<div id="vitrine" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px"></div>
+<p class="sub" id="vitrine-aide">Les 3 premières viennent de l'application, la 4e est intégrée à cette page.</p>
+
 <div id="resultats"></div>
 
 <button id="reparer" type="button" style="background:#c2410c">Vider la mémoire et recharger</button>
@@ -65,6 +72,46 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
     var p = document.createElement('pre'); p.textContent = texte; zone.appendChild(p);
     R.push(texte);
   }
+
+  // ---- 0. Vitrine : les images s'affichent-elles, oui ou non ? ------------
+  // Trois icones reelles de l'appli et une image de reference encodee dans la page.
+  // Si les 3 premieres sont vides et la 4e visible, le probleme est le
+  // telechargement des icones. Si les 4 sont vides, ce sont les images en general
+  // qui ne s'affichent pas sur cet appareil, et l'appli n'y est pour rien.
+  var VITRINE = [
+    { nom: 'house', src: 'icons/premium3d/house.webp' },
+    { nom: 'pig', src: 'icons/premium3d/pig.webp' },
+    { nom: 'settings', src: 'icons/premium3d/settings.webp' },
+    { nom: 'reference', src: 'data:image/gif;base64,R0lGODlhIAAgAPABAP9uhwAAACH5BAAAAAAALAAAAAAgACAAAAI+' +
+        'hI+py+0Po5y02ouz3rz7D4biSJbmiabqyrbuC8fyTNf2jef6zvf+DwwKh8Si8YhMKpfMpvMJjUqn1KpVUAAAOw==' }
+  ];
+  var vitrine = document.getElementById('vitrine');
+  var chargees = 0, echouees = 0, referenceOk = false;
+  VITRINE.forEach(function (v) {
+    var boite = document.createElement('div');
+    boite.setAttribute('style', 'width:74px;height:88px;border:2px solid #26304d;border-radius:10px;' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:#161d31');
+    var im = document.createElement('img');
+    im.setAttribute('style', 'width:44px;height:44px;object-fit:contain');
+    im.alt = '';
+    im.onload = function () {
+      chargees++;
+      if (v.nom === 'reference') referenceOk = true;
+      etiquette.textContent = 'vue';
+      etiquette.style.color = '#5ce7b0';
+    };
+    im.onerror = function () {
+      echouees++;
+      etiquette.textContent = 'ECHEC';
+      etiquette.style.color = '#ff8fa2';
+    };
+    im.src = v.src;
+    var etiquette = document.createElement('span');
+    etiquette.setAttribute('style', 'font-size:11px;color:#93a0c2');
+    etiquette.textContent = '…';
+    boite.appendChild(im); boite.appendChild(etiquette);
+    vitrine.appendChild(boite);
+  });
 
   // ---- 1. L'appareil et le navigateur -------------------------------------
   titre('Appareil');
@@ -325,7 +372,24 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
   function conclure(nbRegles, estDuCss, estDuHtml, mep, ecarts) {
     var v = document.getElementById('verdict');
     var txt, classe;
-    if (ecarts && ecarts.length) {
+
+    // Ce que la vitrine a donne, ajoute au rapport a copier.
+    titre('Affichage des images');
+    ligne('Images affichees', chargees + ' sur ' + VITRINE.length, chargees === VITRINE.length ? 'oui' : 'non');
+    ligne('Image de reference', referenceOk ? 'visible' : 'INVISIBLE', referenceOk ? 'oui' : 'non');
+
+    var iconesKo = (echouees > 0 && echouees < VITRINE.length && referenceOk);
+    var toutKo = (chargees === 0);
+
+    if (toutKo) {
+      txt = 'TROUVE : aucune image ne s\'affiche sur cet appareil, meme celle integree ' +
+            'a cette page. Le probleme ne vient pas de l\'application.';
+      classe = 'ko';
+    } else if (iconesKo) {
+      txt = 'TROUVE : les icones de l\'application ne peuvent pas etre telechargees, ' +
+            'alors que l\'image de reference s\'affiche.';
+      classe = 'ko';
+    } else if (ecarts && ecarts.length) {
       txt = 'TROUVE : l\'appli garde en memoire une ancienne version de ' +
             ecarts.join(', ') + '. C\'est ce melange qui casse l\'affichage.';
       classe = 'ko';
