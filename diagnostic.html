@@ -49,7 +49,7 @@ Elle ne lit aucune donnée personnelle et n'envoie rien.</p>
 <p class="sub" style="margin-top:8px">Ce bouton efface uniquement les fichiers gardés en mémoire
 par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.</p>
 
-<button id="copier" type="button">Copier le rapport</button>
+<button id="copier" type="button" disabled style="opacity:.5">Analyse en cours…</button>
 
 <script>
 (function () {
@@ -85,6 +85,28 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
     { nom: 'reference', src: 'data:image/gif;base64,R0lGODlhIAAgAPABAP9uhwAAACH5BAAAAAAALAAAAAAgACAAAAI+' +
         'hI+py+0Po5y02ouz3rz7D4biSJbmiabqyrbuC8fyTNf2jef6zvf+DwwKh8Si8YhMKpfMpvMJjUqn1KpVUAAAOw==' }
   ];
+  // Navigateur integre a une autre application : le rapport ne dirait rien du
+  // probleme, qui se produit dans Safari. On le signale avant toute autre chose,
+  // sinon on analyse le mauvais navigateur sans s'en rendre compte.
+  var uaTot = navigator.userAgent;
+  var integresTot = [
+    ['Snapchat', /Snapchat/i], ['Instagram', /Instagram/i], ['Facebook', /FBAN|FBAV|FB_IAB/i],
+    ['Messenger', /Messenger/i], ['TikTok', /BytedanceWebview|TikTok|musical_ly/i],
+    ['LinkedIn', /LinkedIn/i], ['Pinterest', /Pinterest/i], ['X (Twitter)', /Twitter/i],
+    ['WhatsApp', /WhatsApp/i], ['Gmail', /GSA\//i]
+  ];
+  var integre = null;
+  for (var z = 0; z < integresTot.length; z++) {
+    if (integresTot[z][1].test(uaTot)) { integre = integresTot[z][0]; break; }
+  }
+  if (integre) {
+    var alerte = document.getElementById('verdict');
+    alerte.className = 'verdict ko';
+    alerte.textContent = 'STOP : tu es dans le navigateur de ' + integre + ', pas dans Safari. ' +
+      'Ce rapport ne servira a rien. Appuie sur les trois points en haut a droite, ' +
+      'puis sur « Ouvrir dans le navigateur » ou « Ouvrir dans Safari », et refais le test.';
+  }
+
   var vitrine = document.getElementById('vitrine');
   var chargees = 0, echouees = 0, referenceOk = false;
   VITRINE.forEach(function (v) {
@@ -144,19 +166,8 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
   sonde.parentNode.removeChild(sonde);
   ligne('Texte de 16 px rendu à', taille + ' px', taille === 16 ? 'oui' : 'non');
 
-  // Navigateur intégré à une autre application (Snapchat, Instagram, Facebook...).
-  // Le rendu et les fonctions y different de Safari, et un diagnostic fait depuis
-  // l'un d'eux ne dit rien de ce qui se passe dans Safari.
-  var integres = [
-    ['Snapchat', /Snapchat/i], ['Instagram', /Instagram/i], ['Facebook', /FBAN|FBAV|FB_IAB/i],
-    ['Messenger', /Messenger/i], ['TikTok', /BytedanceWebview|TikTok|musical_ly/i],
-    ['LinkedIn', /LinkedIn/i], ['Pinterest', /Pinterest/i], ['X (Twitter)', /Twitter/i],
-    ['WhatsApp', /WhatsApp/i], ['Gmail', /GSA\//i]
-  ];
-  var integre = null;
-  for (var k = 0; k < integres.length; k++) {
-    if (integres[k][1].test(ua)) { integre = integres[k][0]; break; }
-  }
+  // Le navigateur intégré a déjà été repéré tout en haut, pour pouvoir avertir
+  // avant même l'analyse. On se contente ici de reporter le constat.
   var installee = window.matchMedia('(display-mode: standalone)').matches
                   || window.navigator.standalone === true;
   ligne('Où tu es', integre ? ('navigateur intégré à ' + integre)
@@ -501,9 +512,20 @@ par l'application. Tes opérations, ton code et ta licence ne sont pas touchés.
         classe = 'attente';
       }
     }
-    v.className = 'verdict ' + classe;
-    v.textContent = txt;
-    R.unshift('VERDICT : ' + txt);
+    // Le verdict du navigateur intégré prime : il a été posé avant l'analyse et
+    // ne doit pas être écrasé par un résultat qui ne veut rien dire dans ce cas.
+    if (!integre) {
+      v.className = 'verdict ' + classe;
+      v.textContent = txt;
+    }
+    R.unshift('VERDICT : ' + (integre ? 'rapport fait dans le navigateur de ' + integre +
+              ', a refaire dans Safari' : txt));
+
+    // L'analyse est finie : le rapport est complet, on autorise la copie.
+    var b = document.getElementById('copier');
+    b.disabled = false;
+    b.style.opacity = '1';
+    b.textContent = 'Copier le rapport';
   }
 
   // Remise a neuf : on supprime les fichiers gardes en memoire et le service worker,
