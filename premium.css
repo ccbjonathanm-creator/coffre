@@ -1255,7 +1255,13 @@ button:not(:disabled):active {
   }
 }
 
-@media (max-width: 430px) {
+/* Jusqu'a 759 px et non 430 : le bloc telephone doit etre contigu au bloc
+   grand ecran (min-width: 760px). Avec 430, tout appareil entre 431 et 759 px
+   ne recevait NI les regles telephone NI les regles grand ecran. Un iPhone
+   16 Pro Max fait 440 px : il vivait en permanence dans cette zone morte,
+   jamais testee, et quel que soit le zoom. C'est le defaut constate chez le
+   premier client dont l'appli s'affichait cassee. */
+@media (max-width: 759px) {
   .view {
     padding-inline: 15px;
   }
